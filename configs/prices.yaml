@@ -1,0 +1,18 @@
+prices:
+  deepseek-v4-flash: &unknown_price
+    currency: USD
+    input_usd_per_1m: 0.0
+    cached_input_usd_per_1m: 0.0
+    output_usd_per_1m: 0.0
+  example-35b: *unknown_price
+  glm-5.2: *unknown_price
+  example-236b: *unknown_price
+  minimax-m2.7: *unknown_price
+  qwen3.6-35b: *unknown_price
+  qwen3.5-397b-a17b: *unknown_price
+  kimi-k2.6: *unknown_price
+  gateway-auto: *unknown_price
+  qwen3.6-27b: *unknown_price
+quota:
+  weekly_budget_usd: 20.0
+  weekly_output_token_budget: null

@@ -1,0 +1,45 @@
+.venv/
+.pytest_cache/
+.uv-cache/
+.hf-cache/
+__pycache__/
+*.py[cod]
+
+.docker-config/
+
+.env
+!.env.example
+
+node_modules/
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+
+data/**
+!data/.gitkeep
+!data/aggregate/
+!data/aggregate/.gitkeep
+!data/raw/
+!data/raw/runs/
+!data/raw/runs/.gitkeep
+vendor/
+uv.lock
+
+# benchmark checkouts (own git repos, large; see configs/benchmark.yaml)
+checkouts/
+
+# local caches / junk (never commit)
+.coverage
+.coverage.*
+.npm-cache/
+.docker-buildx/
+NUL
+.scratch/
+
+# any env files except the sanitized example
+.env.*
+!.env.example
+
+# prototype screenshots may contain internal model names; keep local only
+docs/prototypes/preview-*.png

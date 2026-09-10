@@ -1,0 +1,55 @@
+# 本地模型目录：测试页「待测模型」的兜底列表。
+# 优先级：IQRADAR_MODEL_NAMES（.env）→ 网关 GET /v1/models 自动发现 → 本文件。
+# model_name 使用「路由前缀/模型名」格式（第一段作为展示用 provider），
+# 请按你自己网关的实际路由命名修改；下面均为示例条目。
+models:
+  - id: deepseek-v4-flash
+    display_name: DeepSeek V4 Flash
+    provider: openai-compatible
+    model_name: gateway/deepseek-v4-flash
+    env: &gateway_env
+      base_url: GATEWAY_BASE_URL
+    effort:
+      supported: true
+      parameter_path: reasoning_effort
+      values:
+        high: high
+        max: max
+  - id: example-35b
+    display_name: Example 35B
+    provider: openai-compatible
+    model_name: gateway/example-35b
+    env: *gateway_env
+    effort: &no_effort
+      supported: false
+      values: {}
+  - id: glm-5.2
+    display_name: Z.ai GLM 5.2
+    provider: openai-compatible
+    model_name: z.ai/glm-5.2
+    env: *gateway_env
+    effort: *no_effort
+  - id: example-236b
+    display_name: Example 236B
+    provider: openai-compatible
+    model_name: gateway/example-236b
+    env: *gateway_env
+    effort: *no_effort
+  - id: minimax-m2.7
+    display_name: MiniMax M2.7
+    provider: openai-compatible
+    model_name: minimax/minimax-m2.7
+    env: *gateway_env
+    effort: *no_effort
+  - id: qwen3.6-35b
+    display_name: Qwen 3.6 35B
+    provider: openai-compatible
+    model_name: qwen/qwen3.6-35b
+    env: *gateway_env
+    effort: *no_effort
+  - id: kimi-k2.6
+    display_name: Kimi K2.6
+    provider: openai-compatible
+    model_name: moonshotai/kimi-k2.6
+    env: *gateway_env
+    effort: *no_effort

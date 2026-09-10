@@ -1,0 +1,201 @@
+# 题目数据统一在 data/datasets/：
+#   git 自带任务用 symlink 指回 checkouts/<repo>/...（start.sh 缺了会补）
+#   HF 准备的题目由 scripts/prepare_*.py 写入。
+# checkouts/ 只放上游 harness；跑分产物在 data/<bench>/jobs。
+benchmarks:
+  deep-swe:
+    type: deep-swe
+    repo_url: https://github.com/datacurve-ai/deep-swe.git
+    local_path: checkouts/deep-swe
+    tasks_path: data/datasets/deep-swe
+    default_timeout_sec: 86400
+    default_concurrency: 1
+    artifact_root: data/deepswe/jobs
+    # env_file 缺省为 <local_path>/.env（deep-swe 检出根目录 .env）
+    # 固定评测任务子集：只测这 10 个（配合 scripts/prewarm_environments.py
+    # 预构建镜像，测试时零网络构建）。按任务名（目录名）字母序前 10 个。
+    test_tasks:
+      - abs-module-cache-flags
+      - abs-stepped-slices
+      - actionlint-action-pinning-lint
+      - adaptix-name-mapping-aliases
+      - aiomonitor-task-snapshots-diff
+      - anko-default-function-arguments
+      - anko-typed-variable-bindings
+      - arcane-drift-detection-baselines
+      - arktype-json-schema-refs-dependencies
+      - awilix-async-container-initialization
+  terminal-bench-2:
+    type: terminal-bench-2
+    repo_url: https://github.com/harbor-framework/terminal-bench.git
+    # TB2 = Harbor 框架 + 新格式（task.toml/instruction.md/environment/solution/
+    # tests，74 题）。harbor CLI 已装（~/.local/bin/harbor，0.20.x）。
+    # 与已下线的 v1（原 checkouts/terminal-bench-1/original-tasks）是两套独立数据。
+    local_path: checkouts/terminal-bench
+    tasks_path: data/datasets/terminal-bench-2
+    default_timeout_sec: 86400
+    default_concurrency: 4
+    artifact_root: data/tb2/jobs
+    # 复用 deep-swe 检出的模型网关环境
+    env_file: checkouts/deep-swe/.env
+    # 默认 agent 为 harbor 内置 mini-swe-agent（litellm，读 OPENAI_BASE_URL/KEY，
+    # 经 --ae 注入容器）。评测用 --no-force-build --no-delete 命中 prewarm 预建的
+    # <task>__<hash>__env-main / ...__verifier__trial-main 镜像。
+    agent: mini-swe-agent
+    # 固定评测任务子集：只测这 10 个（与 deep-swe 相同策略，配合
+    # scripts/prewarm_environments.py 预构建镜像，测试时零网络构建）。
+    # 按任务名（目录名）字母序前 10 个；与本机 4 个 GPU-only 任务
+    # （exam-pdf-eval/fp8-rmsnorm-gemm/jax-speedrun-gpu/math-eval-grader）
+    # 无重叠，全部可跑。
+    test_tasks:
+      - atrx-vep-crispr
+      - batched-eval-parity
+      - biped-contact-dynamics
+      - bun-sourcemap-leak
+      - cad-model
+      - cargo-flight-dispatch
+      - cli-2ph-simplex
+      - coq-block-bound
+      - ctr-optimization
+      - cumulative-layout-shift
+  # 轻量 API 评测：直连 Bifrost 网关，逐题 chat/completions 打分，无 Docker、
+  # 无子进程、无 checkout。tasks_path 指向题目集 JSONL（每行一题：task_id /
+  # prompt / reference，可选 language / match / extract / tolerance）。
+  #   match: exact | set | numeric | judge（judge 用 LLM 裁判，再调一次网关）
+  #   extract: raw | last_line | boxed | final（从回答里抽取最终答案）
+  gpqa-diamond:
+    type: api-eval
+    # Idavidrein/gpqa 是 gated 数据集，这里用其免认证镜像 talzoomanzoo/gpqa_diamond
+    repo_url: https://huggingface.co/datasets/talzoomanzoo/gpqa_diamond
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/gpqa-diamond.jsonl
+    default_timeout_sec: 21600          # 6 小时（198 题 × ~90s 加余量）
+    default_concurrency: 1
+    request_timeout_sec: 600            # 单次调用 10 分钟（effort=high 推理题可超 60s，旧 300s 曾截断长题）
+    max_tokens: 32768                   # 推理模型会先占满思考预算，过小则 content 为空
+    artifact_root: data/api-eval/jobs
+  aime-2024:
+    type: api-eval
+    repo_url: https://huggingface.co/datasets/HuggingFaceH4/aime_2024
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/aime-2024.jsonl
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 600
+    max_tokens: 32768
+    artifact_root: data/api-eval/jobs
+  mmlu-pro:
+    type: api-eval
+    # 官方组织是 TIGER-Lab（TIGER-AI-Lab 在镜像上 404）；10 选项 A–J 知识题
+    repo_url: https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/mmlu-pro.jsonl
+    dataset_name: TIGER-Lab/MMLU-Pro
+    dataset_mirror: https://hf-mirror.com
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 600
+    max_tokens: 32768
+    artifact_root: data/api-eval/jobs
+  arc-agi-2:
+    type: api-eval
+    # 官方公开评测 120 题 / 173 用例（arc-agi-community 镜像，parquet 可经
+    # hf-mirror 拉取）；官方 arcprize/arc-agi-2 在镜像上不可达。栅格以 JSON
+    # 文本喂入，无需多模态；match=grid 结构判分
+    repo_url: https://huggingface.co/datasets/arc-agi-community/arc-agi-2
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/arc-agi-2.jsonl
+    dataset_name: arc-agi-community/arc-agi-2
+    dataset_mirror: https://hf-mirror.com
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 600
+    max_tokens: 32768
+    artifact_root: data/api-eval/jobs
+  chinese-simpleqa:
+    type: api-eval
+    # 中文事实问答 3000 题（OpenStellarTeam/Chinese-SimpleQA，短答单事实）。
+    # language=zh + match=judge + extract=raw。官方协议即 LLM-as-judge（0-shot，
+    # 不要求完全匹配，DeepSeek-V4 报 Pass@1 ≈76）；参考答案是单一标准表述且无
+    # 别名列表，字符串全等会把语义正确的回答（Markdown/中英对照/别名）全判错。
+    repo_url: https://huggingface.co/datasets/OpenStellarTeam/Chinese-SimpleQA
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/chinese-simpleqa.jsonl
+    dataset_name: OpenStellarTeam/Chinese-SimpleQA
+    dataset_mirror: https://hf-mirror.com
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 300
+    max_tokens: 16384
+    artifact_root: data/api-eval/jobs
+  hmmt-feb-2026:
+    type: api-eval
+    # HMMT 2026 年 2 月赛 33 题（MathArena/hmmt_feb_2026），LaTeX 答案，用 LLM
+    # 裁判判分（match=judge）规避 LaTeX 归一化难题。
+    repo_url: https://huggingface.co/datasets/MathArena/hmmt_feb_2026
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/hmmt-feb-2026.jsonl
+    dataset_name: MathArena/hmmt_feb_2026
+    dataset_mirror: https://hf-mirror.com
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 600
+    max_tokens: 32768
+    artifact_root: data/api-eval/jobs
+  hle:
+    type: api-eval
+    # Humanity's Last Exam 纯文本版 2370 题（官方 cais/hle 在镜像上 gated，
+    # 用免认证 macabdul9/hle_text_only）。多选题 match=exact、自由题 match=judge。
+    repo_url: https://huggingface.co/datasets/macabdul9/hle_text_only
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/hle.jsonl
+    dataset_name: macabdul9/hle_text_only
+    dataset_mirror: https://hf-mirror.com
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 600
+    max_tokens: 32768
+    artifact_root: data/api-eval/jobs
+  livecodebench:
+    type: api-eval
+    # LiveCodeBench 纯文本生成 1055 题（社区 parquet 转换版，脚本型原库在当前
+    # datasets 版本不可加载）。match=judge：裁判对照题目+公开样例判代码正确性，
+    # 不做沙箱执行（见 scripts/prepare_api_eval.py 说明）。
+    repo_url: https://huggingface.co/datasets/ali-elganzory/livecodebench-code_generation_lite
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/livecodebench.jsonl
+    dataset_name: ali-elganzory/livecodebench-code_generation_lite
+    dataset_mirror: https://hf-mirror.com
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 600
+    max_tokens: 65536
+    artifact_root: data/api-eval/jobs
+  codeforcesRating:
+    type: api-eval
+    # Codeforces 按难度抽题（touristgpt/Codeforces-COTs 带 rating 800–3500，
+    # 默认筛 1400–2400）。match=judge，裁判对照题目+公开样例判代码正确性。
+    repo_url: https://huggingface.co/datasets/touristgpt/Codeforces-COTs
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/codeforces.jsonl
+    dataset_name: touristgpt/Codeforces-COTs
+    dataset_mirror: https://hf-mirror.com
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 600
+    max_tokens: 32768
+    artifact_root: data/api-eval/jobs
+  imo-answerbench:
+    type: api-eval
+    # IMO / IMO Shortlist 问题与简短答案（OpenEvals/IMO-AnswerBench），LaTeX
+    # 答案用 match=judge 判分。
+    repo_url: https://huggingface.co/datasets/OpenEvals/IMO-AnswerBench
+    local_path: data/datasets/api-eval
+    tasks_path: data/datasets/api-eval/imo-answerbench.jsonl
+    dataset_name: OpenEvals/IMO-AnswerBench
+    dataset_mirror: https://hf-mirror.com
+    default_timeout_sec: 21600
+    default_concurrency: 1
+    request_timeout_sec: 600
+    max_tokens: 32768
+    artifact_root: data/api-eval/jobs

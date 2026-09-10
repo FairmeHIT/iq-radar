@@ -1,0 +1,89 @@
+# IQRadar 榜单汇聚模块配置
+# 数据源配置、场景定义、模型名归一化映射
+
+sources:
+  - id: arena-ai
+    enabled: true
+    base_url: https://api.wulong.dev/arena-ai-leaderboards/v1
+    refresh_interval_hours: 24
+
+  - id: llm-stats
+    enabled: true
+    api_key_env: LLM_STATS_API_KEY
+    base_url: https://api.llm-stats.com/stats/v1
+    refresh_interval_hours: 12
+
+  - id: codex-radar
+    enabled: true
+    base_url: https://codexradar.com
+    refresh_interval_hours: 24
+
+  - id: superclue
+    enabled: true
+    refresh_interval_hours: 168
+    extra:
+      month: "2026年7月"
+
+  - id: agentbench
+    enabled: true
+    refresh_interval_hours: 168
+
+# 模型名归一化映射
+# canonical_name: [alias1, alias2, ...]
+model_name_aliases:
+  claude-fable-5:
+    - claude-fable-5
+    - Claude Fable 5
+    - claude-fable-5
+    - anthropic/claude-fable-5
+  claude-opus-5:
+    - claude-opus-5
+    - Claude Opus 5
+    - claude-opus-5-max
+    - Claude Opus 5 (Max)
+  claude-opus-4:
+    - claude-opus-4
+    - Claude Opus 4
+    - claude-opus-4-6-high
+    - Claude Opus 4.6 (High)
+  gpt-5:
+    - gpt-5
+    - GPT-5
+    - openai/gpt-5
+    - GPT 5
+  gpt-4o:
+    - gpt-4o
+    - GPT-4o
+    - openai/gpt-4o
+    - gpt-4o-2024-08-06
+  deepseek-r1:
+    - deepseek-r1
+    - DeepSeek-R1
+    - deepseek/deepseek-r1
+    - deepseek-r1-0528
+  deepseek-v4:
+    - deepseek-v4
+    - DeepSeek-V4
+    - deepseek/deepseek-v4
+    - deepseek-v4-flash
+  kimi-k3:
+    - kimi-k3
+    - Kimi K3
+    - kimi-k3-max
+    - Kimi K3 (Max)
+  qwen3:
+    - qwen3
+    - Qwen3
+    - qwen3-max
+    - qwen3.8-max
+    - Qwen3.8 Max
+  grok-4:
+    - grok-4
+    - Grok-4
+    - grok-4-6-high
+    - Grok 4.6 (High)
+  gemini-2.5:
+    - gemini-2.5
+    - Gemini 2.5
+    - gemini-2.5-pro
+    - Gemini 2.5 Pro

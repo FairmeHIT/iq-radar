@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IQRadar 基准选型报告 — 测试大模型"智商"的基准组合</title>
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --panel: #ffffff;
+    --ink: #1d2433;
+    --ink-soft: #55617a;
+    --line: #e4e8f0;
+    --brand: #2563eb;
+    --brand-ink: #1d4ed8;
+    --accent: #0ea5e9;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --bad: #dc2626;
+    --chip-bg: #eef2ff;
+    --code-bg: #f1f5f9;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px -12px rgba(16,24,40,.12);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Hiragino Sans GB", system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.75;
+    font-size: 15px;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px 80px; }
+
+  /* ---------- header ---------- */
+  header.hero {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 60%, #1e3a8a 100%);
+    color: #e8edf7;
+    padding: 56px 24px 48px;
+    border-bottom: 4px solid var(--brand);
+  }
+  .hero-inner { max-width: 1060px; margin: 0 auto; }
+  .kicker {
+    display: inline-block; font-size: 12.5px; letter-spacing: .14em;
+    color: #93c5fd; font-weight: 600; text-transform: uppercase;
+    border: 1px solid rgba(147,197,253,.35); border-radius: 999px;
+    padding: 4px 12px; margin-bottom: 18px;
+  }
+  h1 { font-size: 30px; line-height: 1.3; margin: 0 0 10px; color: #fff; }
+  .sub { font-size: 15.5px; color: #b6c3d9; max-width: 860px; }
+  .meta { margin-top: 18px; font-size: 13px; color: #8fa1bd; display: flex; flex-wrap: wrap; gap: 8px 22px; }
+  .meta b { color: #dbe6f7; font-weight: 600; }
+
+  /* ---------- nav ---------- */
+  nav.toc {
+    position: sticky; top: 0; z-index: 30;
+    background: rgba(255,255,255,.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto; white-space: nowrap;
+  }
+  nav.toc a {
+    display: inline-block; color: var(--ink-soft); text-decoration: none;
+    padding: 13px 14px; font-size: 13.5px; font-weight: 600;
+  }
+  nav.toc a:hover { color: var(--brand-ink); }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 44px; }
+  h2 {
+    font-size: 22px; margin: 0 0 6px; padding-top: 8px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  h2 .no {
+    flex: 0 0 auto; width: 32px; height: 32px; border-radius: 9px;
+    background: var(--brand); color: #fff; font-size: 15px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .lede { color: var(--ink-soft); margin: 0 0 20px 42px; font-size: 14.5px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 22px 24px; margin-top: 18px;
+  }
+  .card h3 { margin: 0 0 12px; font-size: 17px; }
+  .card h4 { margin: 20px 0 8px; font-size: 14.5px; color: var(--brand-ink); }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  a { color: var(--brand-ink); }
+  strong { color: #111827; }
+  .dim { color: var(--ink-soft); font-size: 13.5px; }
+
+  /* ---------- summary boxes ---------- */
+  .tl {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 14px; margin-top: 18px;
+  }
+  .tl-item {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px 18px; box-shadow: var(--shadow);
+  }
+  .tl-item .t { font-size: 13px; font-weight: 700; color: var(--brand-ink); margin-bottom: 6px; }
+  .tl-item .d { font-size: 13.5px; color: var(--ink-soft); }
+
+  /* ---------- benchmark cards ---------- */
+  .bench { border-left: 4px solid var(--brand); }
+  .bench .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+  .bench .name { font-size: 18px; font-weight: 700; }
+  .bench .tag {
+    font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+    background: var(--chip-bg); color: var(--brand-ink); letter-spacing: .02em;
+  }
+  .bench .tag.t-docker { background: #ecfdf5; color: #047857; }
+  .bench .tag.t-api { background: #fef3c7; color: #b45309; }
+  .bench .tag.t-hard { background: #fee2e2; color: #b91c1c; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 12px; }
+  .kv { background: var(--code-bg); border-radius: 8px; padding: 12px 14px; }
+  .kv .k { font-size: 12px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; }
+  .kv .v { font-size: 13.5px; margin-top: 4px; }
+  .score-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+  }
+  .score-chip.sat { background: #fef3c7; color: #92400e; }
+  .score-chip.med { background: #e0f2fe; color: #075985; }
+  .score-chip.hard { background: #fee2e2; color: #991b1b; }
+
+  /* ---------- matrix ---------- */
+  .matrix-wrap { overflow-x: auto; }
+  table.matrix { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 13.5px; }
+  table.matrix th, table.matrix td { border: 1px solid var(--line); padding: 9px 10px; text-align: center; }
+  table.matrix th { background: var(--code-bg); font-weight: 700; }
+  table.matrix td.dim { text-align: left; font-weight: 600; }
+  .dot-full { color: var(--ok); font-weight: 800; }
+  .dot-half { color: var(--warn); font-weight: 800; }
+  .dot-none { color: #cbd5e1; }
+
+  /* ---------- recommendation table ---------- */
+  table.rec { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  table.rec th, table.rec td { border: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; }
+  table.rec th { background: var(--code-bg); font-weight: 700; white-space: nowrap; }
+  table.rec tr:nth-child(even) td { background: #fbfcfe; }
+  .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; color: #fff; }
+  .pill.p0 { background: var(--ok); }
+  .pill.p1 { background: var(--brand); }
+  .pill.p2 { background: #7c3aed; }
+  .pill.p3 { background: #94a3b8; }
+
+  /* ---------- radar ---------- */
+  .radar-wrap { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .radar-wrap figure { margin: 0; flex: 1 1 340px; text-align: center; }
+  .radar-wrap figcaption { font-size: 12.5px; color: var(--ink-soft); margin-top: 6px; }
+  .legend { flex: 1 1 240px; padding-top: 8px; }
+  .legend .row { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; font-size: 13.5px; }
+  .swatch { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 auto; margin-top: 5px; }
+  .legend ul { list-style: none; padding: 0; margin: 12px 0 0; }
+  .legend li { font-size: 13px; color: var(--ink-soft); margin: 3px 0; }
+
+  /* ---------- pipeline ---------- */
+  .phase {
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-top: 14px;
+    background: var(--panel); box-shadow: var(--shadow);
+  }
+  .phase .pt { font-weight: 700; font-size: 15px; display: flex; gap: 8px; align-items: center; }
+  .phase .pt .badge { font-size: 11.5px; background: #dbeafe; color: #1e40af; border-radius: 999px; padding: 1px 9px; }
+
+  /* ---------- misc ---------- */
+  .callout {
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+    border: 1px solid; font-size: 14px;
+  }
+  .callout.good { background: #f0fdf4; border-color: #bbf7d0; }
+  .callout.warn { background: #fffbeb; border-color: #fde68a; }
+  .callout.warn b { color: var(--warn); }
+  .callout.good b { color: var(--ok); }
+  .refs { font-size: 13px; }
+  .refs li { margin: 6px 0; }
+  .refs code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; background: var(--code-bg); padding: 1px 6px; border-radius: 5px; }
+  footer {
+    margin-top: 56px; padding: 24px 0; border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--ink-soft); text-align: center;
+  }
+  @media print {
+    nav.toc { display: none; }
+    body { background: #fff; }
+    .card, .tl-item, .phase { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <span class="kicker">Benchmark Selection Report · 基准选型报告</span>
+    <h1>IQRadar 基准选型报告：用哪几个 Benchmark 测大模型的"智商"</h1>
+    <p class="sub">
+      回答三个问题：<strong>当前五个基准（DeepSWE / SWE-Bench Pro / Terminal-Bench / GPQA Diamond / AIME 2024）为什么被选中</strong>；
+      它们各自在测什么能力；<strong>要更全面地刻画大模型"智商"，还应该补哪些基准</strong>。
+    </p>
+    <div class="meta">
+      <span>项目：<b>IQRadar（local LLM IQ radar）</b></span>
+      <span>报告日期：<b>2026-08</b></span>
+      <span>适用范围：<b>configs/benchmark.yaml</b></span>
+      <span>数据口径：<b>截至撰写时公开榜单/论文信息</b></span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#summary">摘要</a>
+  <a href="#framework">“智商”的维度框架</a>
+  <a href="#why">为什么是这五个</a>
+  <a href="#matrix">覆盖矩阵</a>
+  <a href="#gaps">缺口分析</a>
+  <a href="#recommend">更合适的补充基准</a>
+  <a href="#portfolio">推荐组合</a>
+  <a href="#risks">风险与口径</a>
+  <a href="#refs">参考来源</a>
+</nav>
+
+<div class="wrap">
+
+<!-- ================= 摘要 ================= -->
+<section id="summary">
+  <h2><span class="no">1</span>摘要</h2>
+  <p class="lede">三句话读完全文。</p>
+  <div class="tl">
+    <div class="tl-item">
+      <div class="t">① 现有五个基准选得对吗？</div>
+      <div class="d">方向正确：它们用最低的落地成本覆盖了<strong>编码工程、工具执行、科学知识、数学推理</strong>四条主线，还兼顾了离线可跑、可信来源和抗污染。但它们缺了"智商"里最关键的一块——<strong>抽象/流体推理（fluid reasoning）</strong>，且知识维度只有一个 GPQA。</div>
+    </div>
+    <div class="tl-item">
+      <div class="t">② 这五者各在测什么？</div>
+      <div class="d">DeepSWE（原创长程工程任务）、SWE-Bench Pro（企业级真实仓库修 bug）、Terminal-Bench（命令行工具使用）测<strong>“动手做事”的智能</strong>；GPQA Diamond（博士级科学）测<strong>知识深度</strong>；AIME 2024（竞赛数学）测<strong>数学推理</strong>。合起来是“能干活 + 有知识 + 会推理”，确实是一个合理的 IQ 雷达雏形。</div>
+    </div>
+    <div class="tl-item">
+      <div class="t">③ 还有更合适的吗？</div>
+      <div class="d">有。最值得补的是 <strong>ARC-AGI-2（抽象推理，最接近人类 IQ 测试的流体智力项）</strong>，其次是 <strong>MMLU-Pro（知识广度）、HLE（顶级难点，防触碰天花板）、MATH-500/Putnam（数学难度梯度）、LiveCodeBench（竞赛代码）、GAIA（通用助手）</strong>，并以 <strong>SWE-bench Verified</strong> 作校准锚点。详见第 6–7 节。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 框架 ================= -->
+<section id="framework">
+  <h2><span class="no">2</span>先定义问题：大模型的"智商"由哪些维度构成</h2>
+  <p class="lede">没有单一基准能测"智商"；IQ 是复合概念，评测组合必须先定维度。</p>
+  <div class="card">
+    <p>人类 IQ 测试（如韦氏、瑞文渐进矩阵）测的是<strong>流体智力</strong>（抽象推理、模式识别、归纳）与<strong>晶体智力</strong>（知识、词汇）。迁移到大模型，"智商"至少应覆盖六个正交能力维度：</p>
+    <ol>
+      <li><strong>知识广度与深度（晶体智力）</strong>——通识/专业知识的存量：MMLU-Pro、GPQA Diamond、HLE。</li>
+      <li><strong>数学与形式推理</strong>——符号操作、多步演绎、竞赛数学：AIME、MATH-500、HMMT/Putnam、FrontierMath。</li>
+      <li><strong>抽象与流体推理（最像"IQ 题"）</strong>——在未见过的模式中做归纳与演绎，瑞文矩阵的机器版：ARC-AGI-1/2、Raven 数据集。</li>
+      <li><strong>编码与工程智能（agentic coding）</strong>——读仓库、定位问题、改代码、跑测试：DeepSWE、SWE-Bench Verified/Pro、LiveCodeBench。</li>
+      <li><strong>工具与交互执行</strong>——终端、浏览器、API 调用等真实环境中的多步操作：Terminal-Bench、GAIA、WebArena。</li>
+      <li><strong>通用助手与鲁棒性</strong>——指令跟随、长上下文、检索型任务、少样本泛化：GAIA、RULER、IFBench 等。</li>
+    </ol>
+    <p class="dim">一份好的评测组合 = 每个维度至少有一个基准 + 每个基准都有难度梯度（易→极难），才能在模型能力快速上涨时不至于集体封顶（饱和）。</p>
+  </div>
+</section>
+
+<!-- ================= 为什么是这五个 ================= -->
+<section id="why">
+  <h2><span class="no">3</span>为什么选中这五个基准</h2>
+  <p class="lede">选型时隐含了三条原则，五个基准恰好是这三条原则的最优交集。</p>
+
+  <div class="tl">
+    <div class="tl-item">
+      <div class="t">原则一：维度互补，不重复考同一件事</div>
+      <div class="d">5 个基准分别押在 4 个不同维度上（编码×2 偏重复、知识、数学、工具），彼此几乎没有重叠，雷达图能画出形状而不是一根柱子。</div>
+    </div>
+    <div class="tl-item">
+      <div class="t">原则二：在 IQRadar 架构里"跑得动"</div>
+      <div class="d">DeepSWE / SWE-Bench Pro / Terminal-Bench 走 Docker + Pier 的 agent 管线；GPQA / AIME 走无 Docker 的 api-eval 管线（直连 Bifrost 网关逐题打分）。国内网络下镜像走 registry-mirrors、数据集走 hf-mirror，全部离线可复现。</div>
+    </div>
+    <div class="tl-item">
+      <div class="t">原则三：可信、权威、抗污染</div>
+      <div class="d">五个都来自公认机构（Datacurve / ScaleAI / Terminal-Bench 团队 / Idavidrein / AIME 竞赛），题目多为短答或执行验证（选择/整数/测试用例），客观可判分，难以"糊弄"；DeepSWE 为原创任务，天然抗泄露。</div>
+    </div>
+  </div>
+
+  <!-- DeepSWE -->
+  <div class="card bench">
+    <div class="head">
+      <span class="name">DeepSWE</span>
+      <span class="tag t-docker">Docker · Pier agent 管线</span>
+      <span class="tag t-hard">原创 · 长程</span>
+      <span class="score-chip hard">难度 ★★★★★</span>
+    </div>
+    <div class="grid2">
+      <div>
+        <h4>它是什么</h4>
+        <p>Datacurve 出品的<strong>原创、长程（long-horizon）真实工程任务</strong>基准（<code>datacurve-ai/deep-swe</code>）：从真实开源仓库提炼的原始开发任务，周期长、步骤多，用来衡量"前沿编码 agent"而非被训练集污染的已知 issue。</p>
+        <h4>测什么维度</h4>
+        <p>维度 4（编码与工程智能）的<strong>高难长程端</strong>：仓库理解、多文件改动、自我验证、长时间自主执行。</p>
+      </div>
+      <div class="kv">
+        <div class="k">为什么选它（对 IQRadar 的价值）</div>
+        <div class="v">
+          • 题目原创，几乎无泄露/刷分风险，是"智商"里最干净的增量信息；<br>
+          • 项目本身就是围绕 DeepSWE + Pier 建的，跑通成本最低，天然是组合里的"主基准"；<br>
+          • 长程任务的耗时/步数/成本本身也是智能密度的体现。
+        </div>
+        <div class="k" style="margin-top:10px">短板 / 注意</div>
+        <div class="v">成本高（单任务可达千万级 token）；当前模型通过率普遍偏低，区分度集中在模型“会不会做事”而非“聪明多少”；任务量有限，样本量需注意。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SWE-Bench Pro -->
+  <div class="card bench">
+    <div class="head">
+      <span class="name">SWE-Bench Pro</span>
+      <span class="tag t-docker">Docker · SweAP 镜像</span>
+      <span class="tag">ScaleAI 出品</span>
+      <span class="score-chip med">难度 ★★★★☆</span>
+    </div>
+    <div class="grid2">
+      <div>
+        <h4>它是什么</h4>
+        <p>ScaleAI 在 2025 年发布的下一代软件工程基准：从约 <strong>177 个真实代码库</strong>中挑出比 SWE-bench Verified 难约 <strong>3 倍</strong>的任务（Pro 子集约 500 例，Pro-OS 全量约 3,000 例），仓库规模 2.5 万行以上，构造了接近真实工程环境的 Docker 环境。</p>
+        <h4>测什么维度</h4>
+        <p>维度 4 的<strong>企业级工程端</strong>：在大仓库中定位问题、跨模块修改、跑真实工具链验证。</p>
+      </div>
+      <div class="kv">
+        <div class="k">为什么选它</div>
+        <div class="v">
+          • 与 DeepSWE 互补：一个偏“原创长程”，一个偏“真实仓库规模与工程复现”；<br>
+          • 公认可信的参照系（SWE-bench 家族的 Pro 版），外部榜单可比性高；<br>
+          • 与 Verified 之间巨大的分数差（发布时最强模型仅约 10–20%，2026 年上升到约 50%±），是当下区分度最好的 SWE 基准之一。
+        </div>
+        <div class="k" style="margin-top:10px">短板</div>
+        <div class="v">镜像体积大、单任务成本高；分数随模型季度更新变动快（这是好事也是噪声）；若只跑少量样本，统计噪声明显。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminal-Bench -->
+  <div class="card bench">
+    <div class="head">
+      <span class="name">Terminal-Bench</span>
+      <span class="tag t-docker">Docker · tb CLI</span>
+      <span class="tag t-hard">真实终端环境</span>
+      <span class="score-chip med">难度 ★★★★☆</span>
+    </div>
+    <div class="grid2">
+      <div>
+        <h4>它是什么</h4>
+        <p>面向<strong>终端/命令行 agent</strong>的基准：在真实 Docker 容器里让模型完成系统管理、脚本编写、CLI 工具使用等任务（本项目固定使用 0.2.x 布局的 original-tasks，共 241 个任务）。2026 年发布的 v2.1 是其新一代版本，已被 Artificial Analysis 的智能指数采用。</p>
+        <h4>测什么维度</h4>
+        <p>维度 5（工具与交互执行）——目前五个基准里唯一测"在真实环境里操作工具"的项，恰好补上 DeepSWE/Pro 之外的动手能力。</p>
+      </div>
+      <div class="kv">
+        <div class="k">为什么选它</div>
+        <div class="v">
+          • 真实环境判分（任务完成即通过），不是嘴炮式问答，衡量"执行智能"；<br>
+          • 与编码 agent 正交：编码强 ≠ 终端会用，反之亦然，是雷达图的重要展开轴；<br>
+          • tb CLI 成熟、可离线跑，镜像可预构建（项目已有 prewarm 支持）。
+        </div>
+        <div class="k" style="margin-top:10px">短板</div>
+        <div class="v">环境/CLI 版本敏感，0.2.x 与 v2.x 不兼容（本项目已踩过坑）；多数模型通过率仍偏低，天花板低意味着对"智商上限"的区分有限。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GPQA Diamond -->
+  <div class="card bench">
+    <div class="head">
+      <span class="name">GPQA Diamond</span>
+      <span class="tag t-api">api-eval · 无 Docker</span>
+      <span class="tag">Idavidrein 出品</span>
+      <span class="score-chip sat">难度 ★★★☆☆（渐饱和）</span>
+    </div>
+    <div class="grid2">
+      <div>
+        <h4>它是什么</h4>
+        <p>由博士级专家出题、<strong>198 道</strong>研究生水平的科学四选一题（生物/化学/物理），其中 Diamond 子集是专家一致同意度最高的部分，被称为"PhD-Level 科学基准"。题目难到非专家几乎不能答对，但模型可以在 0.9 以上。</p>
+        <h4>测什么维度</h4>
+        <p>维度 1（知识深度/晶体智力）——专门的深度知识项，五个基准里唯一的"知识"来源。</p>
+      </div>
+      <div class="kv">
+        <div class="k">为什么选它</div>
+        <div class="v">
+          • 极低成本（198 题 × 单次调用，api-eval 直连网关，无 Docker 无子进程）；<br>
+          • 判分客观、题库稳定，是各家榜单标配，可比性好；<br>
+          • hf-mirror 上有免认证镜像，离线/受限网络可跑。
+        </div>
+        <div class="k" style="margin-top:10px">短板</div>
+        <div class="v">头部模型已逼近 ~85–90%，<strong>接近饱和</strong>，对最强模型的区分度下降——这正是需要 HLE 之类更难的"知识题"的原因；且只覆盖三个理科，缺人文社科等知识广度。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AIME 2024 -->
+  <div class="card bench">
+    <div class="head">
+      <span class="name">AIME 2024</span>
+      <span class="tag t-api">api-eval · 无 Docker</span>
+      <span class="tag">官方竞赛题</span>
+      <span class="score-chip sat">难度 ★★★☆☆（渐饱和）</span>
+    </div>
+    <div class="grid2">
+      <div>
+        <h4>它是什么</h4>
+        <p>美国数学邀请赛（American Invitational Mathematics Examination）2024 年的<strong>30 道真题</strong>（I 卷 + II 卷各 15 题），答案是 0–999 的整数。竞赛数学推理的行业标准基准，被几乎所有模型卡与论文用作数学能力锚点。</p>
+        <h4>测什么维度</h4>
+        <p>维度 2（数学与形式推理）——多步推理、组合/数论/几何代数的综合运用。</p>
+      </div>
+      <div class="kv">
+        <div class="k">为什么选它</div>
+        <div class="v">
+          • 官方真题、判分客观（整数答案），无裁判 LLM 的主观性；<br>
+          • 成本极低（30 题），几十秒到几分钟即可出一组分数；<br>
+          • HuggingFaceH4/aime_2024 免认证可直接准备成本地 JSONL。
+        </div>
+        <div class="k" style="margin-top:10px">短板</div>
+        <div class="v">深度推理型前沿模型（o 系列、R1 级别）已接近满分，<strong>基本饱和</strong>；30 题样本小，Wilson 区间宽（±8% 量级），单次分数不宜过度解读。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 覆盖矩阵 ================= -->
+<section id="matrix">
+  <h2><span class="no">4</span>覆盖矩阵与雷达图</h2>
+  <p class="lede">把五个基准映射到六个维度，一眼看出强项与空白。</p>
+
+  <div class="card">
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <tr>
+          <th>能力维度</th>
+          <th>DeepSWE</th>
+          <th>SWE-Bench Pro</th>
+          <th>Terminal-Bench</th>
+          <th>GPQA Diamond</th>
+          <th>AIME 2024</th>
+          <th>当前覆盖</th>
+        </tr>
+        <tr><td class="dim">知识深度（晶体智力）</td><td class="dot-none">—</td><td class="dot-none">—</td><td class="dot-none">—</td><td class="dot-full">●</td><td class="dot-none">—</td><td>仅 GPQA · 弱</td></tr>
+        <tr><td class="dim">数学与形式推理</td><td class="dot-none">—</td><td class="dot-none">—</td><td class="dot-none">—</td><td class="dot-half">◐</td><td class="dot-full">●</td><td>中（AIME 饱和中）</td></tr>
+        <tr><td class="dim">抽象/流体推理</td><td class="dot-none">—</td><td class="dot-none">—</td><td class="dot-none">—</td><td class="dot-none">—</td><td class="dot-none">—</td><td><strong class="dim" style="color:var(--bad)">空白 ✕</strong></td></tr>
+        <tr><td class="dim">编码与工程智能</td><td class="dot-full">●</td><td class="dot-full">●</td><td class="dot-half">◐</td><td class="dot-none">—</td><td class="dot-none">—</td><td>强（但同质）</td></tr>
+        <tr><td class="dim">工具与交互执行</td><td class="dot-half">◐</td><td class="dot-half">◐</td><td class="dot-full">●</td><td class="dot-none">—</td><td class="dot-none">—</td><td>中</td></tr>
+        <tr><td class="dim">通用助手/鲁棒性</td><td class="dot-none">—</td><td class="dot-none">—</td><td class="dot-half">◐</td><td class="dot-none">—</td><td class="dot-none">—</td><td>弱</td></tr>
+      </table>
+    </div>
+    <p class="dim" style="margin-top:10px">● 直接覆盖　◐ 间接/部分覆盖　— 不覆盖。最刺眼的空白：<strong>抽象/流体推理</strong>——它恰恰是最接近人类"IQ 测试"的维度。</p>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:16px">雷达图：当前组合 vs 补齐后组合（0–5 分，权重示意）</h3>
+    <div class="radar-wrap">
+      <figure>
+        <svg viewBox="0 0 320 300" width="100%" max-width="340" role="img" aria-label="能力维度雷达图">
+          <!-- grid rings -->
+          <circle cx="160" cy="150" r="18" fill="none" stroke="#e4e8f0"/>
+          <circle cx="160" cy="150" r="36" fill="none" stroke="#e4e8f0"/>
+          <circle cx="160" cy="150" r="54" fill="none" stroke="#e4e8f0"/>
+          <circle cx="160" cy="150" r="72" fill="none" stroke="#e4e8f0"/>
+          <circle cx="160" cy="150" r="90" fill="none" stroke="#e4e8f0"/>
+          <!-- spokes -->
+          <g stroke="#dbe2ee">
+            <line x1="160" y1="150" x2="160" y2="60"/>
+            <line x1="160" y1="150" x2="82.1" y2="105"/>
+            <line x1="160" y1="150" x2="82.1" y2="195"/>
+            <line x1="160" y1="150" x2="160" y2="240"/>
+            <line x1="160" y1="150" x2="237.9" y2="195"/>
+            <line x1="160" y1="150" x2="237.9" y2="105"/>
+          </g>
+          <!-- axis labels -->
+          <g font-size="11" fill="#55617a" text-anchor="middle" font-weight="600">
+            <text x="160" y="34">知识深度</text>
+            <text x="68" y="96">数学推理</text>
+            <text x="72" y="212">抽象/流体</text>
+            <text x="160" y="258">编码工程</text>
+            <text x="248" y="212">工具执行</text>
+            <text x="244" y="96">通用助手</text>
+          </g>
+          <!-- current (5 benchmarks) -->
+          <polygon points="160,96 105.4,118.5 144.4,159 160,231 214.6,181.5 183.4,136.5"
+                   fill="rgba(148,163,184,.28)" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6 4"/>
+          <!-- recommended -->
+          <polygon points="160,78 89.9,109.5 97.7,186 160,231 222.4,186 214.6,118.5"
+                   fill="rgba(37,99,235,.22)" stroke="#2563eb" stroke-width="2.5"/>
+          <!-- center -->
+          <circle cx="160" cy="150" r="3" fill="#1d2433"/>
+        </svg>
+        <figcaption>灰虚线 = 现有 5 基准；蓝实线 = 补齐后组合。数值为按"每个维度至少一个基准且含难度梯度"的示意评分。</figcaption>
+      </figure>
+      <div class="legend">
+        <div class="row"><span class="swatch" style="background:#94a3b8"></span><div><b>当前 5 基准</b><br>编码/工具强，抽象推理几乎为零，知识仅单点，数学中位。</div></div>
+        <div class="row"><span class="swatch" style="background:#2563eb"></span><div><b>补齐后组合</b><br>补 ARC-AGI-2（抽象）、MMLU-Pro/HLE（知识）、MATH-500/Putnam（数学梯度）、GAIA（通用助手），六个维度全部立起来。</div></div>
+        <ul>
+          <li>• 编码工程由 DeepSWE + SWE-Bench Pro 双支撑，已很充分；</li>
+          <li>• 抽象维度是当前最大的"智商盲区"；</li>
+          <li>• 知识/数学维度需要从"单点"扩成"梯度"。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 缺口分析 ================= -->
+<section id="gaps">
+  <h2><span class="no">5</span>现有组合的缺口：为什么还"不够测智商"</h2>
+  <p class="lede">不是五个选得不好，而是五个还不够——尤其是当你真的想量化"智商"这个上限指标。</p>
+  <div class="card">
+    <h4>缺口 1：没有抽象/流体推理项 —— 这是最像"IQ 题"的维度</h4>
+    <p>人类 IQ 测试的核心是瑞文渐进矩阵式的<strong>抽象模式推理</strong>。现有五个基准全部是"知识/代码/数学"类，没有任何一项测"从未见过的抽象任务上即时归纳"。这在能力维度上是一个整块空白。</p>
+    <h4>缺口 2：知识维度只有单点，且正趋饱和</h4>
+    <p>GPQA Diamond 只覆盖三个理科的博士级知识，头部模型已 85%+。既缺人文社科/工程通识（广度），又缺更难的题库（上限），模型的"知识天花板"测不出来。</p>
+    <h4>缺口 3：数学只有竞赛级单点，上下都缺梯度</h4>
+    <p>AIME 对最强模型已接近满分（饱和），又缺少比 AIME 更难的数学（HMMT/Putnam/FrontierMath）和更便宜的低端基线（MATH-500）——难度没有梯度，曲线画不完整。</p>
+    <h4>缺口 4：编码偏"修 bug"，缺"从零写算法"的纯推理编码</h4>
+    <p>DeepSWE/Pro 都是仓库内改代码（定位→修改→测试），没有测算法设计与 competitive 编程这类更"烧脑"的纯推理编码（LiveCodeBench 恰好补这个）。</p>
+    <h4>缺口 5：agent 能力缺"通用助手"场景</h4>
+    <p>Terminal-Bench 只覆盖终端。浏览器、知识检索、多工具编排等通用 agent 任务（GAIA）缺席，导致"会不会用一般工具干一般活"测不到。</p>
+    <h4>缺口 6：缺一个"校准锚点"</h4>
+    <p>SWE-bench Verified 虽然逐年接近饱和，但它是全行业引用最广的 SWE 参照系。有一个 Verified 分数，外部可比性和"Pro 相对 Verified 的悬崖"都能直观呈现。</p>
+  </div>
+</section>
+
+<!-- ================= 推荐 ================= -->
+<section id="recommend">
+  <h2><span class="no">6</span>更合适的补充基准：候选清单</h2>
+  <p class="lede">按"对测智商的信息增量 × IQRadar 落地成本"排序，分四档。表格里"适配"指能否直接走现有 api-eval 或 Docker agent 管线。</p>
+
+  <div class="card" style="overflow-x:auto">
+    <table class="rec">
+      <tr>
+        <th>基准</th><th>测什么</th><th>难度</th><th>规模</th><th>IQRadar 适配</th><th>参考分数（约）</th><th>建议</th>
+      </tr>
+      <tr>
+        <td><strong>ARC-AGI-2</strong></td>
+        <td>抽象/流体推理（瑞文矩阵式）</td>
+        <td>★★★★★ 极难</td>
+        <td>公开题集 + 私有集</td>
+        <td>api-eval 可跑（题目即输入输出栅格；困难点需要自建渲染与判分）</td>
+        <td>发布时所有模型 &lt;5%（o3 ≈ 4%），最不饱和的基准之一</td>
+        <td><span class="pill p0">T0 强推</span></td>
+      </tr>
+      <tr>
+        <td><strong>MMLU-Pro</strong></td>
+        <td>知识广度（14 学科、更难更抗污染的 MMLU）</td>
+        <td>★★★☆☆ 中</td>
+        <td>~12k 题（可采样 500–1000）</td>
+        <td>api-eval 直接适配（MCQ 判分）</td>
+        <td>前沿 ~80%±，区分度优于已饱和的原版 MMLU</td>
+        <td><span class="pill p0">T0 强推</span></td>
+      </tr>
+      <tr>
+        <td><strong>MATH-500</strong></td>
+        <td>数学推理低端基线（AoPS 难度的竞赛训练题集）</td>
+        <td>★★☆☆☆ 中下</td>
+        <td>500 题</td>
+        <td>api-eval 直接适配</td>
+        <td>前沿 ~95%+（接近饱和，但作为梯度低端很便宜）</td>
+        <td><span class="pill p1">T1 推荐</span></td>
+      </tr>
+      <tr>
+        <td><strong>HMMT / Putnam / AIME 2025</strong></td>
+        <td>比 AIME 更难的竞赛数学（梯度高端，接力 AIME）</td>
+        <td>★★★★☆ 难</td>
+        <td>每卷 10–30 题</td>
+        <td>api-eval 直接适配</td>
+        <td>Putnam 对最强模型仍显著 &lt;50%；HMMT 约 40–70%</td>
+        <td><span class="pill p1">T1 推荐</span></td>
+      </tr>
+      <tr>
+        <td><strong>Humanity's Last Exam (HLE)</strong></td>
+        <td>知识/推理天花板（专家投稿的极难题）</td>
+        <td>★★★★★ 极难</td>
+        <td>~3,000 题（MCQ + 短答）</td>
+        <td>api-eval 可跑（测子集降成本）</td>
+        <td>50% 天花板 2026 年被突破；前沿仍在 ~10–50% 区间</td>
+        <td><span class="pill p1">T1 推荐</span></td>
+      </tr>
+      <tr>
+        <td><strong>LiveCodeBench / Pro</strong></td>
+        <td>纯算法/竞赛编码推理（无污染、按时间窗出题）</td>
+        <td>★★★★☆ 难</td>
+        <td>每期数百题</td>
+        <td>api-eval + 判题器（工程量中等）</td>
+        <td>前沿 40–60%（hard 子集更低）</td>
+        <td><span class="pill p1">T1 推荐</span></td>
+      </tr>
+      <tr>
+        <td><strong>SWE-bench Verified</strong></td>
+        <td>SWE 行业参照系（校准锚点）</td>
+        <td>★★★☆☆ 中（对前沿渐饱和）</td>
+        <td>500 题</td>
+        <td>Docker agent（复用 Pro 的镜像/管线，改动小）</td>
+        <td>前沿 ~90%±（2026 年），与 Pro 之间仍有巨大悬崖</td>
+        <td><span class="pill p1">T1 推荐</span></td>
+      </tr>
+      <tr>
+        <td><strong>GAIA</strong></td>
+        <td>通用助手/多步工具编排（检索+计算+工具）</td>
+        <td>★★★★☆ 难</td>
+        <td>466 题验证集</td>
+        <td>需浏览器/检索环境，适合后续 agent 扩展（工作量较大）</td>
+        <td>前沿 ~50–70%</td>
+        <td><span class="pill p2">T2 可选</span></td>
+      </tr>
+      <tr>
+        <td><strong>FrontierMath（Epoch AI）</strong></td>
+        <td>数学天花板（人类未解/极难原创题）</td>
+        <td>★★★★★ 极难</td>
+        <td>数百题（需申请授权）</td>
+        <td>api-eval 可跑，但数据 gated，需申请</td>
+        <td>长期 &lt;20%，2026 年仍大多不可解</td>
+        <td><span class="pill p2">T2 可选</span></td>
+      </tr>
+      <tr>
+        <td><strong>原版 MMLU / MMLU-Redux / CMMLU</strong></td>
+        <td>中低端知识基线 / 中文知识</td>
+        <td>★★☆☆☆ 中下</td>
+        <td>大</td>
+        <td>api-eval 直接适配</td>
+        <td>原版 MMLU 前沿 ~90% 已饱和</td>
+        <td><span class="pill p3">T3 依需</span></td>
+      </tr>
+      <tr>
+        <td><strong>WebArena / OSWorld / CORE-Bench</strong></td>
+        <td>浏览器/桌面/科研复现等真实 agent 场景</td>
+        <td>★★★★★ 极难</td>
+        <td>数百体量</td>
+        <td>基础设施成本高，暂不适合当前轻量架构</td>
+        <td>前沿多在 20–40%</td>
+        <td><span class="pill p3">T3 暂缓</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="callout good">
+    <b>一句话结论：</b>最能提升"测智商"信息量的三个优先级是 ——
+    <strong>ARC-AGI-2</strong>（补抽象/流体推理，最接近人类 IQ 测试的本体）、
+    <strong>MMLU-Pro</strong>（把知识从单点扩成广度）、
+    <strong>MATH-500 + Putnam 类</strong>（把数学从单点扩成梯度）；
+    再加 <strong>HLE</strong> 作上限缓冲，配 <strong>SWE-bench Verified</strong> 作行业校准锚点，雷达图六轴就齐了。
+  </div>
+</section>
+
+<!-- ================= 推荐组合 ================= -->
+<section id="portfolio">
+  <h2><span class="no">7</span>推荐组合与落地节奏</h2>
+  <p class="lede">分三个阶段推进：先跑零成本增量，再补 Docker 锚点，最后做重基建项。括号内为预估投入（按单模型、收敛样本估算）。</p>
+
+  <div class="phase">
+    <div class="pt"><span class="badge">Phase 1 · 本周可做（低代码）</span>补齐“智商”最缺的两根轴</div>
+    <ul>
+      <li>接入 <strong>ARC-AGI-2</strong>：自建渲染（题目 JSON → 输入栅格 → 模型输出栅格 → 判分），数十题即可看形状（api-eval 新类型，预计 1–2 天）；</li>
+      <li>接入 <strong>MMLU-Pro</strong>：沿用现有 api-eval 的 MCQ 判分，采样 500–1000 题（预计半天）；</li>
+      <li>接入 <strong>MATH-500</strong> 与 <strong>HMMT/Putnam 子集</strong>：沿用 numeric 判分，把数学拉成低→中→高梯度（预计 1 天）。</li>
+    </ul>
+  </div>
+  <div class="phase">
+    <div class="pt"><span class="badge">Phase 2 · 两周内（中等代码）</span>上限缓冲与行业锚点</div>
+    <ul>
+      <li><strong>HLE 子集</strong>（~300–500 题采样）：防止 GPQA 饱和后知识维度失去区分度（api-eval，预计 1 天）；</li>
+      <li><strong>SWE-bench Verified</strong>：复用 SWE-bench Pro 的 SweAP 镜像/管线，把"Verified vs Pro"悬崖变成雷达图上的信息（预计 1–2 天 + 跑分成本）；</li>
+      <li><strong>LiveCodeBench</strong>：搭判题器（沙箱编译/运行），逐步放开（预计 2–3 天）。</li>
+    </ul>
+  </div>
+  <div class="phase">
+    <div class="pt"><span class="badge">Phase 3 · 择机（重）</span>真实世界 agent 与数学天花板</div>
+    <ul>
+      <li><strong>GAIA</strong>：需要检索/浏览器基础设施，适合在 agent 框架扩展后接入；</li>
+      <li><strong>FrontierMath</strong>：走申请流程拿数据集，作为"数学不可能三角"的展示项。</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h4>成本提示（数量级）</h4>
+    <p>api-eval 类（GPQA/AIME/MMLU-Pro/MATH-500/HLE）：每基准每模型几十到几百次调用，成本可忽略，是"高频降智雷达"的理想载荷。Docker agent 类（DeepSWE/Pro/Verified）：单任务可达数百万到千万 token，是"低频深度体检"载荷。建议保持现有节奏——<strong>api-eval 天天跑，Docker agent 按周跑</strong>。</p>
+  </div>
+</section>
+
+<!-- ================= 风险 ================= -->
+<section id="risks">
+  <h2><span class="no">8</span>风险与统计口径注意事项</h2>
+  <p class="lede">基准会老化、分数会通胀，选型报告需要把这些风险写进口径。</p>
+  <div class="card">
+    <ul>
+      <li><strong>饱和（saturation）与污染（contamination）是最大风险</strong>：AIME、GPQA 已被写进大量训练语料，前沿模型逐年逼近满分；新基准（ARC-AGI-2、HLE、DeepSWE）抗污染强但样本小。对策：每季度复核一遍各基准的头部分数，淘汰"集体 95%+"的项，补充难档；</li>
+      <li><strong>样本量决定置信区间</strong>：AIME 仅 30 题，Wilson 区间宽；发布打点前至少对每个基准×模型积累 30–100 个样本，并在大盘同时展示区间；</li>
+      <li><strong>IQ 公式口径</strong>：IQ = pass_rate × 1.5（上限 150）目前是"单基准通过率的线性换算"。若扩到多基准组合，建议改为"分维度加权"，对极难基准（ARC-AGI-2、FrontierMath）给权重而非线性分，否则天花板基准永远拉低总分，反而失去引导意义；</li>
+      <li><strong>成本与配额</strong>：Docker 类基准单任务 token 消耗巨大（曾有单任务千万级 input），跑批前用预算预估脚本做额度检查；</li>
+      <li><strong>环境漂移</strong>：Terminal-Bench 的 0.2.x / v2.x 不兼容、SWE-Bench 镜像随 Docker Hub 更新漂移——固定镜像 tag 与任务版本，避免"分数变了其实是环境变了"；</li>
+      <li><strong>双口径发布</strong>：保持"运行完成 ≠ 上大盘"的显式发布边界，快照不可变，给每个快照打上"基准集版本号"，方便历史可比。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================= 来源 ================= -->
+<section id="refs">
+  <h2><span class="no">9</span>参考来源</h2>
+  <p class="lede">分数为撰写时公开信息，模型能力迭代快，请以最新榜单为准。</p>
+  <div class="card refs">
+    <ol>
+      <li>DeepSWE 官方仓库（原创长程工程任务）——<a href="https://github.com/datacurve-ai/deep-swe" target="_blank" rel="noopener">github.com/datacurve-ai/deep-swe</a>；数据集说明 <a href="https://huggingface.co/datasets/datacurve/deep-swe" target="_blank" rel="noopener">HuggingFace: datacurve/deep-swe</a></li>
+      <li>SWE-Bench Pro 官方仓库（ScaleAI，Pro-OS）——<a href="https://github.com/scaleapi/SWE-bench_Pro-os" target="_blank" rel="noopener">github.com/scaleapi/SWE-bench_Pro-os</a>；介绍 <a href="https://systems-analysis.ru/eng/SWE-bench_Pro" target="_blank" rel="noopener">systems-analysis.ru</a>；Verified vs Pro 分数悬崖分析 <a href="https://agentmarketcap.ai/blog/2026/05/02/swe-bench-verified-vs-pro-70-point-performance-cliff" target="_blank" rel="noopener">agentmarketcap.ai</a></li>
+      <li>Terminal-Bench 论文与 v2.1——<a href="https://ar5iv.labs.arxiv.org/html/2601.11868" target="_blank" rel="noopener">ar5iv: 论文</a>；<a href="https://www.tbench.ai/news/terminal-bench-2-1" target="_blank" rel="noopener">tbench.ai: Terminal-Bench 2.1</a>；Artificial Analysis 智能指数采用说明 <a href="https://artificialanalysis.ai/methodology/intelligence-benchmarking" target="_blank" rel="noopener">artificialanalysis.ai</a></li>
+      <li>GPQA Diamond（198 题，PhD 级科学）——<a href="https://benchlm.ai/blog/posts/gpqa-diamond-science-benchmark" target="_blank" rel="noopener">benchlm.ai 介绍</a>；<a href="https://systems-analysis.ru/eng/GPQA_Diamond_Benchmark" target="_blank" rel="noopener">systems-analysis.ru</a>；数据集 <a href="https://huggingface.co/datasets/talzoomanzoo/gpqa_diamond" target="_blank" rel="noopener">talzoomanzoo/gpqa_diamond（免认证镜像）</a></li>
+      <li>AIME 2024（30 题竞赛数学）——<a href="https://ukgovernmentbeis.github.io/inspect_evals/evals/aime2024/" target="_blank" rel="noopener">Inspect Evals: AIME 2024</a>；榜单 <a href="https://llm-stats.com/benchmarks/aime" target="_blank" rel="noopener">llm-stats AIME leaderboard</a></li>
+      <li>ARC-AGI-2（抽象推理，最不饱和）——<a href="https://benchgen.com/benchmarks/chollet-et-al-arc-prize-foundation/arc-agi-v2" target="_blank" rel="noopener">BenchGen: ARC-AGI v2</a></li>
+      <li>Humanity's Last Exam（HLE）——<a href="https://benchlm.ai/blog/posts/hle-50-percent-ceiling-falls" target="_blank" rel="noopener">benchlm.ai: HLE 50% 天花板被突破</a>；数据集 <a href="https://huggingface.co/datasets/FUSE-verifiers/HLE-Verifications" target="_blank" rel="noopener">HuggingFace: HLE-Verifications</a></li>
+      <li>FrontierMath（Epoch AI）——<a href="https://epoch.ai/latest/benchmarking-ai-on-unsolved-math-problems" target="_blank" rel="noopener">epoch.ai: 未解数学题基准</a>；<a href="https://epoch.ai/gradient-updates/less-than-70-percent-of-frontiermath-is-within-reach-for-todays-models" target="_blank" rel="noopener">epoch.ai: 多数题目不可解</a></li>
+      <li>MMLU-Pro——<a href="https://raw.githubusercontent.com/TIGER-AI-Lab/MMLU-Pro/main/README.md" target="_blank" rel="noopener">TIGER-AI-Lab/MMLU-Pro</a></li>
+      <li>LiveCodeBench Pro——<a href="https://proceedings.neurips.cc/paper_files/paper/2025/hash/9712b78386cebdc3db7f1a48c2d20edb-Abstract-Datasets_and_Benchmarks_Track.html" target="_blank" rel="noopener">NeurIPS 2025 D&amp;B Track</a></li>
+    </ol>
+    <p class="dim">说明：DeepSWE、Terminal-Bench 等基准迭代频繁，<code>configs/benchmark.yaml</code> 中固定的任务版本（如 original-tasks、镜像 tag）与本报告"最新版"信息可能有差异，属预期内的版本锁定。</p>
+  </div>
+</section>
+
+<footer>
+  IQRadar · 基准选型报告 · 生成于 2026-08 · 本文为方案文档，落地以 configs/benchmark.yaml 变更评审为准
+</footer>
+
+</div>
+</body>
+</html>

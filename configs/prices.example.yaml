@@ -1,0 +1,9 @@
+prices:
+  my-model:
+    currency: USD
+    input_usd_per_1m: 2.0
+    cached_input_usd_per_1m: 0.0
+    output_usd_per_1m: 20.0
+quota:
+  weekly_budget_usd: 20.0
+  weekly_output_token_budget: null

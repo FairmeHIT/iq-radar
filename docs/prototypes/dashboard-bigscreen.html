@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IQRadar 大盘 · 数据大屏风格原型</title>
+<script src="./echarts.min.js"></script>
+<style>
+:root {
+  --bg: #040b16;
+  --panel: rgba(10, 25, 41, 0.55);
+  --panel-line: rgba(46, 120, 170, 0.45);
+  --corner: #2fd7ff;
+  --text: #eaf4fb;
+  --muted: #7f9ab3;
+  --cyan: #2fd7ff;
+  --green: #5ef2a0;
+  --amber: #ffc857;
+  --blue: #5b9dff;
+  --violet: #9b8cff;
+  --rose: #fb7185;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); }
+body {
+  min-height: 100vh;
+  color: var(--text);
+  font-family: "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  /* 科技网格 + 径向辉光背景（纯 CSS，借鉴模板 010/017 的星空感） */
+  background-image:
+    radial-gradient(ellipse 90% 55% at 50% -8%, rgba(47, 215, 255, 0.16), transparent 65%),
+    radial-gradient(ellipse 60% 45% at 8% 108%, rgba(91, 157, 255, 0.10), transparent 60%),
+    radial-gradient(ellipse 60% 45% at 92% 108%, rgba(155, 140, 255, 0.08), transparent 60%),
+    linear-gradient(rgba(47, 215, 255, 0.033) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(47, 215, 255, 0.033) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 42px 42px, 42px 42px;
+}
+
+.shell { width: min(1680px, 100%); margin: 0 auto; padding: 14px 26px 30px; }
+
+/* ===== 顶部：中央大标题 + 装饰线 + 时钟（借鉴 001/012） ===== */
+.topbar {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 86px;
+  margin-bottom: 16px;
+  background:
+    linear-gradient(90deg, transparent, rgba(47, 215, 255, 0.10) 30%, rgba(47, 215, 255, 0.10) 70%, transparent) bottom / 100% 1px no-repeat;
+}
+.topbar::before, .topbar::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 120px; height: 10px;
+  border-bottom: 1px solid rgba(47, 215, 255, 0.7);
+}
+.topbar::before { left: 50%; transform: translateX(calc(-100% - 240px)) skewX(-40deg); }
+.topbar::after { right: 50%; transform: translateX(calc(100% + 240px)) skewX(40deg); }
+.top-title { text-align: center; }
+.top-title h1 {
+  font-size: 34px;
+  letter-spacing: 6px;
+  font-weight: 800;
+  background: linear-gradient(180deg, #ffffff 15%, #8fe8ff 55%, #2fd7ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 26px rgba(47, 215, 255, 0.35);
+}
+.top-title p { margin-top: 4px; color: var(--muted); font-size: 12px; letter-spacing: 4px; }
+.top-left, .top-right { display: flex; align-items: center; gap: 12px; }
+.top-right { justify-content: flex-end; }
+.clock { font: 700 22px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--cyan); text-shadow: 0 0 14px rgba(47, 215, 255, 0.5); }
+.clock small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; font-weight: 400; letter-spacing: 1px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid rgba(94, 242, 160, 0.4); border-radius: 4px;
+  background: rgba(94, 242, 160, 0.08);
+  color: var(--green); padding: 5px 9px; font-size: 12px; font-weight: 700;
+}
+.chip.demo { border-color: rgba(255, 200, 87, 0.45); background: rgba(255, 200, 87, 0.09); color: var(--amber); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.tabs { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--panel-line); border-radius: 6px; background: rgba(8, 18, 30, 0.7); }
+.tabs button {
+  border: 1px solid transparent; background: transparent; color: var(--muted);
+  padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; border-radius: 4px;
+}
+.tabs button.active { border-color: rgba(47, 215, 255, 0.4); background: rgba(47, 215, 255, 0.12); color: var(--cyan); }
+
+/* ===== 四角括号面板（借鉴 001/012，纯 CSS 实现，不用 PNG） ===== */
+.panel {
+  position: relative;
+  border: 1px solid var(--panel-line);
+  background: var(--panel);
+  backdrop-filter: blur(2px);
+  padding: 14px;
+}
+.panel::before, .panel::after,
+.panel > .corners::before, .panel > .corners::after {
+  content: "";
+  position: absolute;
+  width: 14px; height: 14px;
+  border: 2px solid var(--corner);
+  filter: drop-shadow(0 0 4px rgba(47, 215, 255, 0.7));
+}
+.panel::before { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+.panel::after { top: -1px; right: -1px; border-left: none; border-bottom: none; }
+.panel > .corners::before { bottom: -1px; left: -1px; border-right: none; border-top: none; }
+.panel > .corners::after { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+
+/* 胶囊标题栏（借鉴 010） */
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: -4px -4px 10px;
+}
+.panel-title {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 6px 16px 6px 12px;
+  border-radius: 4px 18px 18px 4px;
+  background: linear-gradient(90deg, rgba(47, 215, 255, 0.22), rgba(47, 215, 255, 0.04));
+  border-left: 3px solid var(--cyan);
+  font-size: 15px; font-weight: 800; letter-spacing: 1px;
+}
+.panel-title small { color: var(--muted); font-size: 10.5px; font-weight: 400; letter-spacing: 0; }
+.panel-count { border: 1px solid var(--panel-line); border-radius: 4px; color: var(--muted); padding: 3px 7px; font-size: 10px; }
+
+/* ===== KPI 卡 ===== */
+.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.kpi { min-height: 108px; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.kpi .kpi-label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.kpi .kpi-label i { width: 8px; height: 8px; background: var(--accent, var(--cyan)); box-shadow: 0 0 8px var(--accent, var(--cyan)); }
+.kpi strong {
+  font: 800 30px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--accent, var(--cyan));
+  text-shadow: 0 0 18px color-mix(in srgb, var(--accent, var(--cyan)) 55%, transparent);
+}
+.kpi small { color: var(--muted); font-size: 10.5px; }
+.kpi-accent-cyan { --accent: var(--cyan); } .kpi-accent-green { --accent: var(--green); }
+.kpi-accent-blue { --accent: var(--blue); } .kpi-accent-amber { --accent: var(--amber); }
+.kpi-accent-violet { --accent: var(--violet); } .kpi-accent-rose { --accent: var(--rose); }
+
+/* ===== 布局 ===== */
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.bottom { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 12px; }
+.chart-stage { position: relative; height: 330px; }
+.chart-stage-compact { height: 280px; }
+.chart-canvas { width: 100%; height: 100%; }
+
+/* ===== 表格 ===== */
+.run-table { max-height: 290px; overflow: auto; margin: 0 -4px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 9px 10px; border-bottom: 1px solid rgba(46, 120, 170, 0.22); text-align: left; white-space: nowrap; font-size: 11.5px; }
+th { position: sticky; top: 0; background: rgba(10, 25, 41, 0.95); color: var(--cyan); font-size: 10.5px; letter-spacing: 1px; }
+td { color: #b9cbda; }
+tbody tr:hover { background: rgba(47, 215, 255, 0.06); }
+.status { display: inline-flex; align-items: center; gap: 4px; border: 1px solid currentColor; border-radius: 3px; padding: 2px 7px; font-size: 10px; font-weight: 700; }
+.status-passed { color: var(--green); background: rgba(94, 242, 160, 0.08); }
+.status-failed { color: #ff6b7a; background: rgba(255, 107, 122, 0.08); }
+.effort-tag { border: 1px solid rgba(91, 157, 255, 0.35); border-radius: 3px; background: rgba(91, 157, 255, 0.1); color: var(--blue); padding: 2px 6px; font: 700 10px ui-monospace, monospace; }
+
+.demo-note {
+  margin-bottom: 12px; border: 1px solid rgba(255, 200, 87, 0.3); border-left: 3px solid var(--amber);
+  background: rgba(255, 200, 87, 0.06); color: #e4d49c; padding: 8px 12px; font-size: 12px; border-radius: 3px;
+}
+.demo-note b { color: var(--amber); font: 800 10px ui-monospace, monospace; margin-right: 8px; }
+
+@media (max-width: 1120px) {
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .bottom { grid-template-columns: 1fr; }
+  .topbar { grid-template-columns: 1fr; gap: 10px; justify-items: center; padding-bottom: 12px; }
+  .topbar::before, .topbar::after { display: none; }
+}
+@media (max-width: 760px) {
+  .kpis, .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .charts { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- 顶栏：左时钟 / 中大标题 / 右状态 -->
+  <header class="topbar">
+    <div class="top-left">
+      <div class="clock"><span id="clock-time">--:--:--</span><small id="clock-date">----年--月--日</small></div>
+    </div>
+    <div class="top-title">
+      <h1>IQRadar 模型监控大盘</h1>
+      <p>MODEL INTELLIGENCE · COST · QUOTA OBSERVATORY</p>
+    </div>
+    <div class="top-right">
+      <span class="chip"><span class="dot"></span>评测 Worker 正常</span>
+      <span class="chip demo"><span class="dot"></span>模拟数据</span>
+      <nav class="tabs">
+        <button class="active">大盘</button>
+        <button>测试</button>
+      </nav>
+    </div>
+  </header>
+
+  <div class="demo-note"><b>DEMO</b>原型页面：数据来自 web/src/features/dashboard/demoData.ts 的固定模拟数据，仅用于预览视觉风格。</div>
+
+  <!-- KPI -->
+  <section class="kpis">
+    <div class="panel kpi kpi-accent-cyan"><span class="corners"></span>
+      <div class="kpi-label"><i></i>综合 IQ</div><strong>74.9</strong><small>按 84 个任务加权</small>
+    </div>
+    <div class="panel kpi kpi-accent-green"><span class="corners"></span>
+      <div class="kpi-label"><i></i>通过率</div><strong>72.6%</strong><small>61 / 84 已通过</small>
+    </div>
+    <div class="panel kpi kpi-accent-blue"><span class="corners"></span>
+      <div class="kpi-label"><i></i>样本量</div><strong>84</strong><small>4 个模型配置</small>
+    </div>
+    <div class="panel kpi kpi-accent-amber"><span class="corners"></span>
+      <div class="kpi-label"><i></i>总成本</div><strong>$25.72</strong><small>$0.306 / 任务</small>
+    </div>
+    <div class="panel kpi kpi-accent-violet"><span class="corners"></span>
+      <div class="kpi-label"><i></i>平均耗时</div><strong>8.6m</strong><small>端到端 wall time</small>
+    </div>
+    <div class="panel kpi kpi-accent-rose"><span class="corners"></span>
+      <div class="kpi-label"><i></i>周任务容量</div><strong>316</strong><small>基于当前额度估算</small>
+    </div>
+  </section>
+
+  <!-- 雷达图 x2 -->
+  <section class="charts">
+    <div class="panel"><span class="corners"></span>
+      <div class="panel-head">
+        <span class="panel-title">模型能力雷达 <small>智力 / 稳定性 / 效率</small></span>
+        <span class="panel-count">4 组</span>
+      </div>
+      <div class="chart-stage"><div id="iq-radar" class="chart-canvas"></div></div>
+    </div>
+    <div class="panel"><span class="corners"></span>
+      <div class="panel-head">
+        <span class="panel-title">额度效率雷达 <small>可持续任务量与单位消耗</small></span>
+        <span class="panel-count">4 组</span>
+      </div>
+      <div class="chart-stage"><div id="quota-radar" class="chart-canvas"></div></div>
+    </div>
+  </section>
+
+  <!-- 对比图 + 运行表 -->
+  <section class="bottom">
+    <div class="panel"><span class="corners"></span>
+      <div class="panel-head">
+        <span class="panel-title">模型效率对比 <small>IQ 与单任务平均成本</small></span>
+        <span class="panel-count">4 组</span>
+      </div>
+      <div class="chart-stage chart-stage-compact"><div id="trend" class="chart-canvas"></div></div>
+    </div>
+    <div class="panel"><span class="corners"></span>
+      <div class="panel-head">
+        <span class="panel-title">最近运行 <small>任务级执行记录</small></span>
+        <span class="panel-count">8 条</span>
+      </div>
+      <div class="run-table">
+        <table>
+          <thead><tr><th>任务</th><th>模型</th><th>强度</th><th>状态</th><th>耗时</th><th>输出 Tokens</th><th>成本</th></tr></thead>
+          <tbody>
+            <tr><td>django-query-regression</td><td>example-35b</td><td><span class="effort-tag">high</span></td><td><span class="status status-passed">通过</span></td><td>9.3m</td><td>4,210</td><td>$0.39</td></tr>
+            <tr><td>react-stream-cleanup</td><td>deepseek-v4-flash</td><td><span class="effort-tag">max</span></td><td><span class="status status-passed">通过</span></td><td>7.2m</td><td>3,184</td><td>$0.28</td></tr>
+            <tr><td>rust-index-boundary</td><td>glm-5.2</td><td><span class="effort-tag">high</span></td><td><span class="status status-failed">失败</span></td><td>10.2m</td><td>2,750</td><td>$0.31</td></tr>
+            <tr><td>go-context-cancel</td><td>qwen3-coder-next</td><td><span class="effort-tag">medium</span></td><td><span class="status status-passed">通过</span></td><td>6.5m</td><td>2,416</td><td>$0.16</td></tr>
+            <tr><td>fastapi-schema-union</td><td>example-35b</td><td><span class="effort-tag">high</span></td><td><span class="status status-passed">通过</span></td><td>10.1m</td><td>3,992</td><td>$0.44</td></tr>
+            <tr><td>vite-worker-resolution</td><td>deepseek-v4-flash</td><td><span class="effort-tag">max</span></td><td><span class="status status-failed">失败</span></td><td>8.4m</td><td>2,921</td><td>$0.33</td></tr>
+            <tr><td>sqlalchemy-session-scope</td><td>glm-5.2</td><td><span class="effort-tag">high</span></td><td><span class="status status-passed">通过</span></td><td>8.3m</td><td>3,017</td><td>$0.25</td></tr>
+            <tr><td>node-esm-loader</td><td>qwen3-coder-next</td><td><span class="effort-tag">medium</span></td><td><span class="status status-passed">通过</span></td><td>6.9m</td><td>2,268</td><td>$0.17</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* 实时时钟 */
+function tick() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  document.getElementById('clock-time').textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const week = ['日','一','二','三','四','五','六'][now.getDay()];
+  document.getElementById('clock-date').textContent = `${now.getFullYear()}年${pad(now.getMonth()+1)}月${pad(now.getDate())}日 周${week}`;
+}
+tick(); setInterval(tick, 1000);
+
+/* 与 demoData.ts 一致的数据 */
+const models = ['example-35b / high', 'deepseek-v4-flash / max', 'glm-5.2 / high', 'qwen3-coder-next / medium'];
+const colors = ['#2fd7ff', '#5ef2a0', '#ffc857', '#9b8cff'];
+const iqRadarData = [
+  [83.3, 83.3, 86, 72, 79],
+  [75, 75, 78, 84, 86],
+  [68.2, 68.2, 74, 78, 90],
+  [61.1, 61.1, 70, 91, 96],
+];
+const quotaRadarData = [
+  [82, 72, 76, 78, 73],
+  [86, 79, 82, 87, 84],
+  [90, 75, 74, 91, 88],
+  [94, 92, 86, 97, 93],
+];
+
+/* 通用雷达图配置：辉光描边 + 渐变填充（ECharts 原生能力） */
+function radarOption(indicators, rows) {
+  return {
+    color: colors,
+    tooltip: { trigger: 'item', backgroundColor: '#0a1929', borderColor: 'rgba(47,215,255,.4)', textStyle: { color: '#eaf4fb' } },
+    legend: { bottom: 0, type: 'scroll', textStyle: { color: '#7f9ab3', fontSize: 11 }, icon: 'circle' },
+    radar: {
+      center: ['50%', '47%'], radius: '62%', splitNumber: 4,
+      indicator: indicators.map((name) => ({ name, max: 100 })),
+      axisName: { color: '#a8d8f0', fontSize: 11 },
+      axisLine: { lineStyle: { color: 'rgba(47,215,255,.25)' } },
+      splitLine: { lineStyle: { color: ['rgba(47,215,255,.22)', 'rgba(47,215,255,.16)', 'rgba(47,215,255,.11)', 'rgba(47,215,255,.07)'] } },
+      splitArea: { areaStyle: { color: ['rgba(47,215,255,.03)', 'rgba(47,215,255,.06)'] } },
+    },
+    series: [{
+      type: 'radar', symbol: 'circle', symbolSize: 5,
+      data: rows.map((value, i) => ({
+        name: models[i], value,
+        lineStyle: { width: 2, shadowBlur: 8, shadowColor: colors[i] },
+        areaStyle: { opacity: 0.06 },
+      })),
+    }],
+  };
+}
+
+echarts.init(document.getElementById('iq-radar')).setOption(
+  radarOption(['智力', '通过率', '稳定性', '速度', '成本效率'], iqRadarData));
+echarts.init(document.getElementById('quota-radar')).setOption(
+  radarOption(['额度友好', '周任务量', '周通过量', '单次成本', 'Token 效率'], quotaRadarData));
+
+/* 柱线对比：渐变柱 + 辉光平滑线 */
+const shortLabels = ['gateway-lan\nhigh', 'ds-v4-flash\nmax', 'glm-5.2\nhigh', 'qwen3-coder\nmedium'];
+echarts.init(document.getElementById('trend')).setOption({
+  color: ['#2fd7ff', '#ffc857'],
+  tooltip: { trigger: 'axis', backgroundColor: '#0a1929', borderColor: 'rgba(47,215,255,.4)', textStyle: { color: '#eaf4fb' } },
+  legend: { top: 0, right: 0, textStyle: { color: '#7f9ab3', fontSize: 11 } },
+  grid: { left: 44, right: 48, top: 36, bottom: 46 },
+  xAxis: { type: 'category', data: shortLabels, axisLabel: { color: '#7f9ab3', fontSize: 10, interval: 0 }, axisLine: { lineStyle: { color: 'rgba(47,215,255,.3)' } }, axisTick: { show: false } },
+  yAxis: [
+    { type: 'value', name: 'IQ', min: 0, max: 150, nameTextStyle: { color: '#7f9ab3' }, axisLabel: { color: '#7f9ab3' }, splitLine: { lineStyle: { color: 'rgba(47,215,255,.1)' } } },
+    { type: 'value', name: '成本', nameTextStyle: { color: '#7f9ab3' }, axisLabel: { color: '#7f9ab3', formatter: '${value}' }, splitLine: { show: false } },
+  ],
+  series: [
+    { name: 'IQ', type: 'bar', barMaxWidth: 30, data: [125, 112.5, 102.3, 91.7],
+      itemStyle: { borderRadius: [3, 3, 0, 0], color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(47,215,255,.95)' }, { offset: 1, color: 'rgba(47,215,255,.15)' }]) } },
+    { name: '平均成本', type: 'line', yAxisIndex: 1, smooth: 0.3, symbol: 'circle', symbolSize: 7,
+      data: [0.42, 0.31, 0.27, 0.18],
+      lineStyle: { width: 2.5, shadowBlur: 12, shadowColor: 'rgba(255,200,87,.5)' },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(255,200,87,.25)' }, { offset: 1, color: 'rgba(255,200,87,0)' }]) } },
+  ],
+});
+
+window.addEventListener('resize', () => document.querySelectorAll('.chart-canvas').forEach((el) => echarts.getInstanceByDom(el)?.resize()));
+</script>
+</body>
+</html>

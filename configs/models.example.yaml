@@ -1,0 +1,16 @@
+models:
+  - id: my-model
+    display_name: My Reasoning Model
+    provider: openai-compatible
+    env:
+      base_url: LLM_BASE_URL
+      api_key: LLM_API_KEY
+      model: LLM_MODEL
+    effort:
+      supported: true
+      parameter_path: reasoning_effort
+      values:
+        low: low
+        medium: medium
+        high: high
+        max: max
