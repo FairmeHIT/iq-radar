@@ -43,3 +43,6 @@ NUL
 
 # prototype screenshots may contain internal model names; keep local only
 docs/prototypes/preview-*.png
+
+# generated analysis reports (regenerable, keep local only)
+docs/*report*.html
