@@ -1449,6 +1449,62 @@ def test_multi_bench_per_item_n_tasks_validation(tmp_path: Path) -> None:
     assert batch["items"][0]["n_tasks"] == 2
 
 
+def test_multi_bench_accepts_three_models_across_ten_benchmarks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """3 个模型 × 10 个 api-eval 基准应可一次提交。"""
+    from iqradar.benchmarks.api_eval import ApiEvalBackend
+
+    dataset = write_api_eval_dataset(tmp_path)
+    (tmp_path / "tasks").mkdir(parents=True, exist_ok=True)
+    benchmark_path = tmp_path / "benchmark-ten-api-eval.yaml"
+    api_benchmarks = "\n".join(
+        f"""  api-eval-{index}:
+    type: api-eval
+    repo_url: https://example.com/api-eval-{index}
+    local_path: {tmp_path / 'api-eval'}
+    tasks_path: {dataset}
+    default_timeout_sec: 3600
+    default_concurrency: 1
+    artifact_root: {tmp_path / 'api-eval-jobs'}"""
+        for index in range(10)
+    )
+    benchmark_path.write_text(
+        f"""benchmarks:
+  deep-swe:
+    repo_url: https://github.com/datacurve-ai/deep-swe.git
+    local_path: {tmp_path / 'deep-swe'}
+    tasks_path: {tmp_path / 'tasks'}
+    default_timeout_sec: 7200
+    default_concurrency: 1
+    artifact_root: {tmp_path / 'jobs'}
+{api_benchmarks}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("IQRADAR_MODEL_NAMES", "gateway/model-a,gateway/model-b,gateway/model-c")
+    monkeypatch.setattr(ApiEvalBackend, "preflight", lambda self: None)
+    monkeypatch.setattr(ApiEvalBackend, "run", lambda *args, **kwargs: (0, ""))
+    client = app_with(tmp_path, benchmark_path=benchmark_path).test_client()
+
+    response = client.post(
+        "/api/deepswe-multi-batches",
+        json={
+            "items": [
+                {"benchmark": f"api-eval-{bench_index}", "model_id": model_id, "n_tasks": 1}
+                for bench_index in range(10)
+                for model_id in ["gateway/model-a", "gateway/model-b", "gateway/model-c"]
+            ],
+            "max_concurrent": 16,
+            "sample_seed": 0,
+        },
+    )
+
+    assert response.status_code == 202
+    batch = response.get_json()["data"]
+    assert len(batch["items"]) == 30
+
+
 def test_multi_bench_per_item_n_tasks_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """不同 item 用各自的 n_tasks：持久化在 state 且调度时生效。"""
     import iqradar.benchmarks.api_eval as api_eval_mod

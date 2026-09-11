@@ -656,8 +656,8 @@ def create_deepswe_blueprint(
         n_concurrent = payload.get("n_concurrent")
         if not isinstance(items, list) or not items:
             return error("items list is required", 400)
-        if len(items) > 20:
-            return error("at most 20 items per multi-bench", 400)
+        if len(items) > 200:
+            return error("at most 200 items per multi-bench", 400)
         if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int) or not 1 <= max_concurrent <= 16:
             return error("max_concurrent must be an integer between 1 and 16", 400)
         if effort not in ALLOWED_EFFORTS:
