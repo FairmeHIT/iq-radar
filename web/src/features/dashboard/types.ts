@@ -79,8 +79,13 @@ export interface RunRecord {
     input_tokens: number
     output_tokens: number
     cached_input_tokens: number
+    total_tokens?: number | null
     agent_steps: number
     wall_time_sec: number
+    first_token_sec?: number | null
+    first_content_sec?: number | null
+    generation_time_sec?: number | null
+    output_tokens_per_sec?: number | null
     usage_estimated: boolean
   }
   cost: {

@@ -130,6 +130,12 @@ def _raw_question_row(row: Mapping[str, Any], index: int) -> dict[str, Any]:
         # 首 token 时延（TTFT）：仅流式调用可得，非流式正文/旧记录为 None。
         "first_token_sec",
         "first_content_sec",
+        "output_tokens_per_sec",
+        "request",
+        "timing",
+        "usage",
+        "quality",
+        "reliability",
     ):
         if key in row:
             result[key] = row[key]
@@ -155,6 +161,16 @@ def _record_row(record: RunRecord, index: int) -> dict[str, Any]:
         "cached_input_tokens": record.usage.cached_input_tokens,
         "usage_estimated": record.usage.usage_estimated,
         "wall_time_sec": record.usage.wall_time_sec,
+        "first_token_sec": record.usage.first_token_sec,
+        "first_content_sec": record.usage.first_content_sec,
+        "output_tokens_per_sec": record.usage.output_tokens_per_sec,
+        "timing": {
+            "wall_time_sec": record.usage.wall_time_sec,
+            "ttft_sec": record.usage.first_token_sec,
+            "first_content_sec": record.usage.first_content_sec,
+            "generation_time_sec": record.usage.generation_time_sec,
+            "output_tokens_per_sec": record.usage.output_tokens_per_sec,
+        },
     }
 
 

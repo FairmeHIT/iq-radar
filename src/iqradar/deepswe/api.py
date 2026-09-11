@@ -442,6 +442,9 @@ def create_deepswe_blueprint(
             retryable_count = service.retryable_infrastructure_failure_count(run)
             if retryable_count is not None:
                 entry["retryable_infrastructure_failure_count"] = retryable_count
+            api_metrics = service.run_api_metrics(run)
+            if api_metrics is not None:
+                entry["api_metrics"] = api_metrics
             payload.append(entry)
         return ok(payload)
 

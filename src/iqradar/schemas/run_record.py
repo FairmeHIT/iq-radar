@@ -47,8 +47,13 @@ class UsageInfo(StrictConfigModel):
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
     cached_input_tokens: int = Field(default=0, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
     agent_steps: int = Field(ge=0)
     wall_time_sec: float = Field(ge=0)
+    first_token_sec: float | None = Field(default=None, ge=0)
+    first_content_sec: float | None = Field(default=None, ge=0)
+    generation_time_sec: float | None = Field(default=None, ge=0)
+    output_tokens_per_sec: float | None = Field(default=None, ge=0)
     usage_estimated: bool = False
 
 

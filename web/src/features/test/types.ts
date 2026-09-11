@@ -35,6 +35,16 @@ export interface RunProgress {
   pending?: number
 }
 
+export interface ApiRunMetrics {
+  avg_wall_time_sec?: number | null
+  avg_first_token_sec?: number | null
+  avg_first_content_sec?: number | null
+  output_tokens_per_sec?: number | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  cached_input_tokens?: number | null
+}
+
 export interface DeepSweRun {
   run_id: string
   status: 'queued' | 'running' | 'completed' | 'failed'
@@ -60,6 +70,8 @@ export interface DeepSweRun {
   retryable_infrastructure_failure_count?: number | null
   /** 是否存在可接续的磁盘中间结果（如 api-eval partial results / terminal-bench-2 harbor job）。 */
   resumable_partial_results?: boolean | null
+  /** api-eval 运行聚合后的 API 质量指标，用于评测记录表展示。 */
+  api_metrics?: ApiRunMetrics | null
 }
 
 export interface DeepSweRunRequest {

@@ -927,6 +927,13 @@ class ApiEvalBackend(BenchmarkBackend):
         run_dir.mkdir(parents=True, exist_ok=True)
         start_index = self._resume_offset(resume_run_id, run_dir)
         self._set_progress(run_id, total=len(items), completed=0)
+        _append_log(
+            log_path,
+            _log_line(
+                f"开始评测 {self.name}: model={_gateway_model_name(model_name)} "
+                f"tasks={len(items)} concurrency={n_concurrent or self.n_concurrent}"
+            ),
+        )
         endpoint = resolve_inference_endpoint(self._gateway)
         base_url = endpoint.base_url
         api_key = endpoint.api_key
@@ -971,6 +978,7 @@ class ApiEvalBackend(BenchmarkBackend):
                 if cancelled:
                     return 1, "cancelled by user"
             self._write_result_json(run_dir)
+            _append_log(log_path, _log_line(f"评测完成 {self.name}: tasks={len(items)}"))
             return 0, ""
         finally:
             self._active.discard(run_id)
@@ -1508,6 +1516,7 @@ class ApiEvalBackend(BenchmarkBackend):
                 usage=usage,
                 wall_time_sec=wall_time_sec,
                 timing=timing,
+                effort=effort,
             )
         if content is None or content == "":
             return self._result(
@@ -1519,6 +1528,7 @@ class ApiEvalBackend(BenchmarkBackend):
                 usage=usage,
                 wall_time_sec=wall_time_sec,
                 timing=timing,
+                effort=effort,
             )
         if item.match == "judge":
             correct, reason = self._judge(item, content, base_url, api_key, model, cancel_event)
@@ -1533,6 +1543,7 @@ class ApiEvalBackend(BenchmarkBackend):
             usage=usage,
             wall_time_sec=wall_time_sec,
             timing=timing,
+            effort=effort,
         )
 
     def _judge(
@@ -1574,9 +1585,26 @@ class ApiEvalBackend(BenchmarkBackend):
         usage: dict[str, int],
         wall_time_sec: float,
         timing: dict[str, float] | None = None,
+        effort: str | None = None,
     ) -> dict[str, Any]:
         timing = timing or {}
+        input_tokens = _int(usage.get("input_tokens"))
+        output_tokens = _int(usage.get("output_tokens"))
+        cached_input_tokens = _int(usage.get("cached_input_tokens"))
+        wall = round(wall_time_sec, 3)
+        ttft = timing.get("first_token_sec")
+        first_content = timing.get("first_content_sec")
+        generation_time = round(max(0.0, wall - ttft), 3) if ttft is not None else None
+        output_tps = (
+            round(output_tokens / generation_time, 3)
+            if generation_time is not None and generation_time > 0 and output_tokens > 0
+            else None
+        )
+        total_tokens = input_tokens + output_tokens
         return {
+            # Legacy flat fields stay for backward compatibility with existing
+            # reports/retry logic. New consumers should prefer the structured
+            # request/timing/usage/quality/reliability blocks below.
             "task_id": item.task_id,
             "prompt": item.prompt,
             "reference": item.reference,
@@ -1585,15 +1613,52 @@ class ApiEvalBackend(BenchmarkBackend):
             "status": status,
             "error_type": error_type,
             "error_message": error_message,
-            "input_tokens": _int(usage.get("input_tokens")),
-            "output_tokens": _int(usage.get("output_tokens")),
-            "cached_input_tokens": _int(usage.get("cached_input_tokens")),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cached_input_tokens": cached_input_tokens,
             "usage_estimated": not bool(usage),
-            "wall_time_sec": round(wall_time_sec, 3),
-            # 首 token 时延（TTFT）：None 表示该次调用没有流式首字信息
-            # （网关返回非流式正文、请求失败，或记录早于该字段上线）。
-            "first_token_sec": timing.get("first_token_sec"),
-            "first_content_sec": timing.get("first_content_sec"),
+            "wall_time_sec": wall,
+            "first_token_sec": ttft,
+            "first_content_sec": first_content,
+            "output_tokens_per_sec": output_tps,
+            "request": {
+                "temperature": 0.0,
+                "reasoning_effort": None if effort == "" else effort,
+                "max_tokens": self.max_tokens,
+                "stream": True,
+                "prompt_chars": len(item.prompt),
+            },
+            "timing": {
+                "wall_time_sec": wall,
+                "ttft_sec": ttft,
+                "first_content_sec": first_content,
+                "generation_time_sec": generation_time,
+                "output_tokens_per_sec": output_tps,
+            },
+            "usage": {
+                "input_tokens": input_tokens,
+                "cached_input_tokens": cached_input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+                "usage_estimated": not bool(usage),
+            },
+            "quality": {
+                "status": status,
+                "score": 1 if status == "passed" else 0,
+                "reference": item.reference,
+                "response": response,
+                "extracted_answer": extract_answer(response or "", item.extract) if response else None,
+                "match": item.match,
+                "extract": item.extract,
+            },
+            "reliability": {
+                "http_status": None,
+                "error_type": error_type,
+                "error_message_redacted": error_message,
+                "retry_count": 0,
+                "cancelled": False,
+                "timeout": status == "timeout",
+            },
         }
 
     def _error_result(
@@ -1613,21 +1678,15 @@ class ApiEvalBackend(BenchmarkBackend):
         )
 
     def _timeout_result(self, item: ApiEvalItem) -> dict[str, Any]:
-        return {
-            "task_id": item.task_id,
-            "prompt": item.prompt,
-            "reference": item.reference,
-            "language": item.language,
-            "response": None,
-            "status": "timeout",
-            "error_type": "timeout",
-            "error_message": "run timeout reached",
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cached_input_tokens": 0,
-            "usage_estimated": False,
-            "wall_time_sec": 0.0,
-        }
+        return self._result(
+            item,
+            response=None,
+            status="timeout",
+            error_type="timeout",
+            error_message="run timeout reached",
+            usage={"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0},
+            wall_time_sec=0.0,
+        )
 
     def _write_result_json(self, run_dir: Path) -> None:
         (run_dir / "result.json").write_text(
@@ -1724,8 +1783,18 @@ class ApiEvalBackend(BenchmarkBackend):
                     "input_tokens": _int(data.get("input_tokens")),
                     "output_tokens": _int(data.get("output_tokens")),
                     "cached_input_tokens": _int(data.get("cached_input_tokens")),
+                    "total_tokens": _optional_int(_nested(data, "usage", "total_tokens"))
+                    or _int(data.get("input_tokens")) + _int(data.get("output_tokens")),
                     "agent_steps": 1,
                     "wall_time_sec": float(data.get("wall_time_sec") or 0.0),
+                    "first_token_sec": _optional_float(data.get("first_token_sec")),
+                    "first_content_sec": _optional_float(data.get("first_content_sec")),
+                    "generation_time_sec": _optional_float(_nested(data, "timing", "generation_time_sec")),
+                    "output_tokens_per_sec": _optional_float(
+                        data.get("output_tokens_per_sec")
+                        if data.get("output_tokens_per_sec") is not None
+                        else _nested(data, "timing", "output_tokens_per_sec")
+                    ),
                     "usage_estimated": bool(data.get("usage_estimated")),
                 },
                 "cost": cost,
@@ -1800,6 +1869,31 @@ def _int(value: object) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _nested(data: dict[str, Any], section: str, key: str) -> object:
+    value = data.get(section)
+    if isinstance(value, dict):
+        return value.get(key)
+    return None
 
 
 def _append_log(path: Path, message: str) -> None:

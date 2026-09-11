@@ -54,12 +54,79 @@ const models = ref<ModelChoice[]>([])
 const modelsError = ref<string | null>(null)
 const benchmarks = ref<BenchmarkChoice[]>([])
 const benchmarksLoaded = ref(false)
-const selectedBenchmarks = ref<string[]>([])
-const selectedModels = ref<string[]>([])
+const SELECTED_BENCHMARKS_STORAGE_KEY = 'iqradar:test:selected-benchmarks:v1'
+
+function loadSelectedBenchmarkIds(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(SELECTED_BENCHMARKS_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+  } catch {
+    return []
+  }
+}
+
+function saveSelectedBenchmarkIds(ids: string[]) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(SELECTED_BENCHMARKS_STORAGE_KEY, JSON.stringify(ids))
+  } catch {
+    /* localStorage 可能被浏览器策略禁用；不影响本次页面内使用 */
+  }
+}
+
+const SELECTED_MODELS_STORAGE_KEY = 'iqradar:test:selected-models:v1'
+const SELECTED_PROVIDER_STORAGE_KEY = 'iqradar:test:selected-provider:v1'
+
+function loadSelectedModelIds(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(SELECTED_MODELS_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+  } catch {
+    return []
+  }
+}
+
+function saveSelectedModelIds(ids: string[]) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(SELECTED_MODELS_STORAGE_KEY, JSON.stringify(ids))
+  } catch {
+    /* localStorage 可能被浏览器策略禁用；不影响本次页面内使用 */
+  }
+}
+
+function loadSelectedProvider(): string {
+  if (typeof window === 'undefined') return 'all'
+  try {
+    return window.localStorage.getItem(SELECTED_PROVIDER_STORAGE_KEY) || 'all'
+  } catch {
+    return 'all'
+  }
+}
+
+function saveSelectedProvider(provider: string) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(SELECTED_PROVIDER_STORAGE_KEY, provider)
+  } catch {
+    /* localStorage 可能被浏览器策略禁用；不影响本次页面内使用 */
+  }
+}
+
+const selectedBenchmarks = ref<string[]>(loadSelectedBenchmarkIds())
+const selectedModels = ref<string[]>(loadSelectedModelIds())
 // 供应商筛选：provider 取模型名第一个 "/" 之前的部分（如 gateway/glm-5.2 -> gateway、
 // gateway/minimax/minimax-m2.7 -> gateway）。后端 /api/models 已提供 provider 字段，
 // 这里再做一次兜底解析（兼容 provider 缺失的旧数据）。
-const selectedProvider = ref('all')
+const selectedProvider = ref(loadSelectedProvider())
 
 function modelProvider(model: ModelChoice): string {
   return model.provider || model.id.split('/')[0] || '其他'
@@ -363,12 +430,14 @@ async function refreshOptions() {
     // 供应商筛选不存在时重置为「全部」，避免列表看起来是空的。
     const modelIds = new Set(models.value.map((model) => model.id))
     selectedModels.value = selectedModels.value.filter((id) => modelIds.has(id))
+    saveSelectedModelIds(selectedModels.value)
     if (
       selectedProvider.value !== 'all'
       && !models.value.some((model) => modelProvider(model) === selectedProvider.value)
     ) {
       selectedProvider.value = 'all'
     }
+    saveSelectedProvider(selectedProvider.value)
     if (!gwChatModel.value) {
       gwChatModel.value = selectedModels.value[0] ?? models.value[0]?.id ?? ''
     }
@@ -377,6 +446,7 @@ async function refreshOptions() {
     if (benchmarkData.length && !selectedBenchmarks.value.length) {
       selectedBenchmarks.value = [benchmarkData[0].id]
     }
+    saveSelectedBenchmarkIds(selectedBenchmarks.value)
     // 恢复批量评测：进行中的恢复轮询；已结束/已取消的批量在最近一次 run 属于
     // 该批量时展示最终状态（避免与之后单独发起的评测混淆）。
     const batchOwnsLatestRun = latestBatch?.models?.some(
@@ -412,8 +482,13 @@ async function refreshOptions() {
       publication.value = null
       execution.value = latestRun
       runProgress.value = latestRun.progress ?? null
-      if (latestRun.benchmark && benchmarks.value.some((b) => b.id === latestRun.benchmark)) {
+      if (
+        latestRun.benchmark
+        && benchmarks.value.some((b) => b.id === latestRun.benchmark)
+        && !selectedBenchmarks.value.length
+      ) {
         selectedBenchmarks.value = [latestRun.benchmark]
+        saveSelectedBenchmarkIds(selectedBenchmarks.value)
       }
       if (latestRun.status === 'queued' || latestRun.status === 'running') {
         const requestId = pollRequestId.value + 1
@@ -444,10 +519,12 @@ function toggleBenchmark(id: string) {
   } else {
     selectedBenchmarks.value.push(id)
   }
+  saveSelectedBenchmarkIds(selectedBenchmarks.value)
 }
 
 function selectDockerBenchmark(id: string, checked: boolean) {
   selectedBenchmarks.value = checked ? [id] : []
+  saveSelectedBenchmarkIds(selectedBenchmarks.value)
 }
 
 async function startMultiBench() {
@@ -970,7 +1047,12 @@ async function retryQuestions(taskIds: string[]) {
   retryingQuestionIds.value = new Set([...retryingQuestionIds.value, ...taskIds])
   questionsError.value = null
   try {
+    error.value = null
+    batchInfo.value = null
+    multiBatchInfo.value = null
     const updated = await retryRunQuestions(run.run_id, taskIds)
+    execution.value = updated
+    runProgress.value = updated.progress ?? null
     // POST 返回 202 时后端已把 run 切到 running；立即同步本地列表，
     // 避免弹窗关闭后评测记录仍显示旧的 completed，用户误以为没有反应。
     const listedIndex = allRuns.value.findIndex((item) => item.run_id === run.run_id)
@@ -1086,6 +1168,11 @@ function hasActiveExecution(): boolean {
   return execution.value?.status === 'queued' || execution.value?.status === 'running'
 }
 
+function setSelectedProvider(provider: string) {
+  selectedProvider.value = provider
+  saveSelectedProvider(provider)
+}
+
 function toggleModel(id: string) {
   const index = selectedModels.value.indexOf(id)
   if (index >= 0) {
@@ -1093,15 +1180,18 @@ function toggleModel(id: string) {
   } else {
     selectedModels.value.push(id)
   }
+  saveSelectedModelIds(selectedModels.value)
 }
 
 function selectAllModels() {
   // 有供应商筛选时“全选”只选当前可见（该供应商）的模型
   selectedModels.value = visibleModels.value.map((model) => model.id)
+  saveSelectedModelIds(selectedModels.value)
 }
 
 function clearModels() {
   selectedModels.value = []
+  saveSelectedModelIds(selectedModels.value)
 }
 
 function executionTitle(run: DeepSweRun): string {
@@ -1152,7 +1242,9 @@ async function refreshLog() {
     logSources.value = sources
     const source = chooseLogSource(sources, execution.value?.benchmark)
     if (!source) {
-      logContent.value = ''
+      logContent.value = execution.value?.status === 'running'
+        ? '评测已启动，正在等待首条日志输出…'
+        : ''
       return
     }
     if (selectedLogSource.value !== source) selectedLogSource.value = source
@@ -1203,6 +1295,29 @@ function runStatusLabel(status: string): string {
     case 'failed': return '失败'
     default: return status
   }
+}
+
+function formatSeconds(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}s` : '--'
+}
+
+function formatTokensPerSecond(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(1)}` : '--'
+}
+
+function formatTokenCount(value: number | null | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? String(Math.round(value)) : '--'
+}
+
+function questionMetric(question: RunQuestion, key: string): number | null | undefined {
+  const direct = question[key]
+  if (typeof direct === 'number') return direct
+  const timing = question.timing
+  if (timing && typeof timing === 'object' && !Array.isArray(timing)) {
+    const nested = (timing as Record<string, unknown>)[key]
+    if (typeof nested === 'number') return nested
+  }
+  return null
 }
 
 function formatRunTime(iso: string): string {
@@ -1519,7 +1634,7 @@ onUnmounted(() => {
                 type="button"
                 class="provider-chip"
                 :class="{ active: selectedProvider === provider }"
-                @click="selectedProvider = provider"
+                @click="setSelectedProvider(provider)"
               >
                 {{ provider === 'all' ? '全部' : provider }}
               </button>
@@ -1834,6 +1949,10 @@ onUnmounted(() => {
               <th>基准</th>
               <th>状态</th>
               <th>任务数</th>
+              <th>TTFT</th>
+              <th>端到端</th>
+              <th>tok/s</th>
+              <th>输出Tok</th>
               <th>强度</th>
               <th>创建</th>
               <th>完成</th>
@@ -1861,6 +1980,10 @@ onUnmounted(() => {
                 <span :class="['status-badge', `status-${run.status}`]">{{ runStatusLabel(run.status) }}</span>
               </td>
               <td>{{ run.n_tasks }}</td>
+              <td>{{ formatSeconds(run.api_metrics?.avg_first_token_sec) }}</td>
+              <td>{{ formatSeconds(run.api_metrics?.avg_wall_time_sec) }}</td>
+              <td>{{ formatTokensPerSecond(run.api_metrics?.output_tokens_per_sec) }}</td>
+              <td>{{ formatTokenCount(run.api_metrics?.output_tokens) }}</td>
               <td><span class="effort-tag">{{ run.effort }}</span></td>
               <td>{{ formatRunTime(run.created_at) }}</td>
               <td>{{ run.completed_at ? formatRunTime(run.completed_at) : '--' }}</td>
@@ -1992,6 +2115,10 @@ onUnmounted(() => {
                 <th>题目</th>
                 <th>状态</th>
                 <th>失败类别</th>
+                <th>TTFT</th>
+                <th>端到端</th>
+                <th>tok/s</th>
+                <th>Token</th>
                 <th>错误</th>
                 <th class="col-action"></th>
               </tr>
@@ -2003,6 +2130,10 @@ onUnmounted(() => {
                   <span :class="['status-badge', `status-${q.status}`]">{{ questionStatusLabel(q.status) }}</span>
                 </td>
                 <td>{{ failureCategoryLabel(q.failure_category) }}</td>
+                <td>{{ formatSeconds(questionMetric(q, 'ttft_sec') ?? questionMetric(q, 'first_token_sec')) }}</td>
+                <td>{{ formatSeconds(questionMetric(q, 'wall_time_sec')) }}</td>
+                <td>{{ formatTokensPerSecond(questionMetric(q, 'output_tokens_per_sec')) }}</td>
+                <td>{{ formatTokenCount(questionMetric(q, 'output_tokens')) }}</td>
                 <td class="run-error" :title="q.error_message || ''">{{ q.error_message || '--' }}</td>
                 <td class="col-action">
                   <button

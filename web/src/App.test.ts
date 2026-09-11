@@ -511,6 +511,12 @@ describe('App', () => {
       benchmark: 'gpqa-diamond',
       snapshot_id: null,
       retryable_infrastructure_failure_count: 0,
+      api_metrics: {
+        avg_first_token_sec: 0.82,
+        avg_wall_time_sec: 12.34,
+        output_tokens_per_sec: 42.1,
+        output_tokens: 500,
+      },
     })
     vi.spyOn(testClient, 'fetchLatestDeepSweRun').mockResolvedValue(apiRun)
     vi.spyOn(testClient, 'fetchLatestBatch').mockResolvedValue(null)
@@ -530,6 +536,11 @@ describe('App', () => {
     await wrapper.find('[data-testid="test-page-tab"]').trigger('click')
     await new Promise((resolve) => setTimeout(resolve, 0))
     await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="runs-table"]').text()).toContain('0.82s')
+    expect(wrapper.find('[data-testid="runs-table"]').text()).toContain('12.34s')
+    expect(wrapper.find('[data-testid="runs-table"]').text()).toContain('42.1')
+    expect(wrapper.find('[data-testid="runs-table"]').text()).toContain('500')
 
     const retryButton = wrapper.find('[data-testid="retry-run-run-gpqa-ok"]')
     expect(retryButton.exists()).toBe(true)
@@ -1027,6 +1038,101 @@ describe('App', () => {
       effort: 'high',
       n_tasks: 100,
     })
+  })
+
+  it('persists selected API benchmarks across page remounts', async () => {
+    mockDashboardData()
+    vi.spyOn(testClient, 'fetchModels').mockResolvedValue({
+      source: 'gateway',
+      error: null,
+      models: [
+        { id: 'gateway/model-a', display_name: 'Model A', provider: 'gateway', label: 'gateway / Model A', efforts: ['high'] },
+      ],
+    })
+    vi.spyOn(testClient, 'fetchBenchmarks').mockResolvedValue([
+      { id: 'deep-swe', type: 'deep-swe', label: 'DeepSWE', category: 'docker' },
+      { id: 'gpqa-diamond', type: 'api-eval', label: 'GPQA Diamond', category: 'api-eval', task_count: 198 },
+      { id: 'aime-2024', type: 'api-eval', label: 'AIME 2024', category: 'api-eval', task_count: 30 },
+    ])
+    vi.spyOn(testClient, 'fetchLatestDeepSweRun').mockResolvedValue(null)
+    vi.spyOn(testClient, 'fetchLatestBatch').mockResolvedValue(null)
+    vi.spyOn(testClient, 'fetchLatestMultiBatch').mockResolvedValue(null)
+    vi.spyOn(testClient, 'fetchDeepSweRuns').mockResolvedValue([])
+    vi.spyOn(testClient, 'fetchGatewaySettings').mockResolvedValue({
+      models_base_url: '',
+      models_api_key: '',
+      inference_base_url: '',
+      inference_api_key: '',
+      updated_at: '',
+    })
+
+    const wrapper = mount(App)
+    await wrapper.find('[data-testid="test-page-tab"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('input[value="deep-swe"]').setValue(false)
+    await wrapper.find('input[value="gpqa-diamond"]').setValue(true)
+    await wrapper.find('input[value="aime-2024"]').setValue(true)
+    expect(window.localStorage.getItem('iqradar:test:selected-benchmarks:v1')).toBe(
+      JSON.stringify(['gpqa-diamond', 'aime-2024']),
+    )
+    wrapper.unmount()
+
+    const remounted = mount(App)
+    await remounted.find('[data-testid="test-page-tab"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await remounted.vm.$nextTick()
+
+    expect((remounted.find('input[value="gpqa-diamond"]').element as HTMLInputElement).checked).toBe(true)
+    expect((remounted.find('input[value="aime-2024"]').element as HTMLInputElement).checked).toBe(true)
+    expect((remounted.find('input[value="deep-swe"]').element as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('persists provider filter and selected models across page remounts', async () => {
+    mockDashboardData()
+    vi.spyOn(testClient, 'fetchModels').mockResolvedValue({
+      source: 'gateway',
+      error: null,
+      models: [
+        { id: 'gateway/model-a', display_name: 'Model A', provider: 'gateway', label: 'gateway / Model A', efforts: ['high'] },
+        { id: 'zai/model-b', display_name: 'Model B', provider: 'zai', label: 'zai / Model B', efforts: ['high'] },
+      ],
+    })
+    vi.spyOn(testClient, 'fetchBenchmarks').mockResolvedValue([
+      { id: 'deep-swe', type: 'deep-swe', label: 'DeepSWE', category: 'docker' },
+    ])
+    vi.spyOn(testClient, 'fetchLatestDeepSweRun').mockResolvedValue(null)
+    vi.spyOn(testClient, 'fetchLatestBatch').mockResolvedValue(null)
+    vi.spyOn(testClient, 'fetchLatestMultiBatch').mockResolvedValue(null)
+    vi.spyOn(testClient, 'fetchDeepSweRuns').mockResolvedValue([])
+    vi.spyOn(testClient, 'fetchGatewaySettings').mockResolvedValue({
+      models_base_url: '',
+      models_api_key: '',
+      inference_base_url: '',
+      inference_api_key: '',
+      updated_at: '',
+    })
+
+    const wrapper = mount(App)
+    await wrapper.find('[data-testid="test-page-tab"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await wrapper.vm.$nextTick()
+
+    await wrapper.findAll('[data-testid="provider-filter"] button').find((button) => button.text() === 'zai')!.trigger('click')
+    await wrapper.find('input[value="zai/model-b"]').setValue(true)
+    expect(window.localStorage.getItem('iqradar:test:selected-provider:v1')).toBe('zai')
+    expect(window.localStorage.getItem('iqradar:test:selected-models:v1')).toBe(JSON.stringify(['zai/model-b']))
+    wrapper.unmount()
+
+    const remounted = mount(App)
+    await remounted.find('[data-testid="test-page-tab"]').trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await remounted.vm.$nextTick()
+
+    expect(remounted.find('[data-testid="provider-filter"] .provider-chip.active').text()).toBe('zai')
+    expect((remounted.find('input[value="zai/model-b"]').element as HTMLInputElement).checked).toBe(true)
+    expect(remounted.find('input[value="gateway/model-a"]').exists()).toBe(false)
   })
 
   it('persists API benchmark question counts across page remounts', async () => {

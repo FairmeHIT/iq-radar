@@ -1658,6 +1658,14 @@ def test_api_eval_run_dispatches_to_backend_and_records(
     assert {record["benchmark"]["name"] for record in records} == {"gpqa-diamond"}
     by_task = {record["benchmark"]["task_id"]: record["result"]["status"] for record in records}
     assert by_task == {"q1": "passed", "q2": "failed"}
+    assert records[0]["usage"]["total_tokens"] == 2
+    assert "output_tokens_per_sec" in records[0]["usage"]
+
+    listed = client.get("/api/deepswe-runs").get_json()["data"]
+    row = next(item for item in listed if item["run_id"] == run_id)
+    assert row["api_metrics"]["input_tokens"] == 2
+    assert row["api_metrics"]["output_tokens"] == 2
+    assert "avg_wall_time_sec" in row["api_metrics"]
 
 
 def test_api_eval_base_url_hash_uses_gateway(

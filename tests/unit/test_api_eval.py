@@ -427,12 +427,22 @@ class TestApiEvalBackend:
         assert returncode == 0
         assert error == ""
         assert (backend.jobs_root / "r1" / "result.json").is_file()
+        log_text = (tmp_path / "run.log").read_text(encoding="utf-8")
+        assert "开始评测 gpqa-diamond" in log_text
+        assert "评测完成 gpqa-diamond" in log_text
         lines = (backend.jobs_root / "r1" / "results.jsonl").read_text(
             encoding="utf-8"
         ).splitlines()
         assert len(lines) == 2
-        statuses = [json.loads(line)["status"] for line in lines]
+        rows = [json.loads(line) for line in lines]
+        statuses = [row["status"] for row in rows]
         assert statuses == ["passed", "failed"]
+        assert rows[0]["timing"]["wall_time_sec"] == rows[0]["wall_time_sec"]
+        assert "output_tokens_per_sec" in rows[0]["timing"]
+        assert rows[0]["usage"]["total_tokens"] == 2
+        assert rows[0]["request"]["stream"] is True
+        assert rows[0]["quality"]["extracted_answer"] == "2"
+        assert rows[0]["reliability"]["retry_count"] == 0
 
     def test_run_cancels(self, tmp_path: Path, monkeypatch) -> None:
         dataset = tmp_path / "q.jsonl"

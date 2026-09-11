@@ -36,6 +36,16 @@ def _positive_int(value: object) -> int:
     return number if number > 0 else 0
 
 
+def _metric_from_question(question: dict[str, object], key: str) -> object:
+    value = question.get(key)
+    if value is not None:
+        return value
+    timing = question.get("timing")
+    if isinstance(timing, dict):
+        return timing.get(key)
+    return None
+
+
 class DeepSweService:
     def __init__(
         self,
@@ -275,6 +285,54 @@ class DeepSweService:
             return bool(backend.has_partial_results(run.run_id))
         except (OSError, ValueError, json.JSONDecodeError, TypeError, KeyError):
             return False
+
+    def run_api_metrics(self, run: DeepSweRun) -> dict[str, float | int | None] | None:
+        """Average latency/throughput metrics for an api-eval run list row."""
+        try:
+            backend = self._backend_for_run(run)
+        except ValueError:
+            return None
+        if getattr(backend, "benchmark_type", None) != "api-eval":
+            return None
+        try:
+            questions = getattr(backend, "run_questions")(
+                run_id=run.run_id,
+                n_tasks=run.n_tasks,
+                sample_seed=run.sample_seed,
+            )
+        except (OSError, ValueError, json.JSONDecodeError, TypeError, KeyError):
+            return None
+        if not questions:
+            return None
+
+        def avg(key: str) -> float | None:
+            values = []
+            for question in questions:
+                value = question.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    values.append(float(value))
+            return round(sum(values) / len(values), 3) if values else None
+
+        output_tokens = sum(_non_negative_int(q.get("output_tokens")) for q in questions)
+        input_tokens = sum(_non_negative_int(q.get("input_tokens")) for q in questions)
+        cached_input_tokens = sum(_non_negative_int(q.get("cached_input_tokens")) for q in questions)
+        generation_time = sum(
+            float(timing)
+            for q in questions
+            if isinstance((timing := _metric_from_question(q, "generation_time_sec")), (int, float))
+            and not isinstance(timing, bool)
+        )
+        return {
+            "avg_wall_time_sec": avg("wall_time_sec"),
+            "avg_first_token_sec": avg("first_token_sec"),
+            "avg_first_content_sec": avg("first_content_sec"),
+            "output_tokens_per_sec": round(output_tokens / generation_time, 3)
+            if generation_time > 0 and output_tokens > 0
+            else avg("output_tokens_per_sec"),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cached_input_tokens": cached_input_tokens,
+        }
 
     def retryable_infrastructure_failure_count(self, run: DeepSweRun) -> int | None:
         """Count api-eval questions eligible for the records-table retry button.
