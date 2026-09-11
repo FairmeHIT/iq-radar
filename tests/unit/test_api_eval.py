@@ -385,6 +385,9 @@ class TestGatewayComplete:
         assert row["status"] == "passed"
         assert isinstance(row["first_token_sec"], float)
         assert row["first_content_sec"] == row["first_token_sec"]
+        log_text = (tmp_path / "run.log").read_text(encoding="utf-8")
+        assert "[stream] model=m bench=demo task=t0 kind=content" in log_text
+        assert 'delta="r"' in log_text
 
 
 # ---------------------------------------------------------------------------

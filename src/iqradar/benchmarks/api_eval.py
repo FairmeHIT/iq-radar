@@ -496,6 +496,7 @@ def gateway_complete(
     max_tokens: int | None = None,
     cancel_event: Event | None = None,
     timing: dict[str, float] | None = None,
+    stream_callback: Callable[[str, str], None] | None = None,
 ) -> tuple[str | None, dict[str, int], str | None]:
     """POST one chat completion to an OpenAI-compatible gateway (streaming).
 
@@ -552,6 +553,7 @@ def gateway_complete(
                     cancel_event,
                     started_at=started_at,
                     timing=timing,
+                    stream_callback=stream_callback,
                 )
             # Gateway ignored stream:true and returned a single JSON body.
             raw = response.read().decode("utf-8", errors="replace")
@@ -570,6 +572,7 @@ def _parse_sse_stream(
     *,
     started_at: float | None = None,
     timing: dict[str, float] | None = None,
+    stream_callback: Callable[[str, str], None] | None = None,
 ) -> tuple[str | None, dict[str, int], str | None]:
     """Read an SSE chat-completion stream and accumulate content + usage.
 
@@ -635,11 +638,15 @@ def _parse_sse_stream(
                 content_parts.append(c)
                 has_content = True
                 mark("content")
+                if stream_callback is not None:
+                    stream_callback("content", c)
             rc = delta.get("reasoning_content") or delta.get("reasoning")
             if isinstance(rc, str) and rc:
                 reasoning_parts.append(rc)
                 has_reasoning = True
                 mark("reasoning")
+                if stream_callback is not None:
+                    stream_callback("reasoning", rc)
     except (OSError, TimeoutError) as error:
         # If we already have partial content, return it as-is (the stream was
         # truncated mid-way, but the answer might still be parseable).
@@ -1128,6 +1135,7 @@ class ApiEvalBackend(BenchmarkBackend):
                     endpoint.api_key,
                     effort,
                     cancel_event,
+                    log_path=log_path,
                 )
                 updates[index] = result
                 settled += 1
@@ -1227,7 +1235,7 @@ class ApiEvalBackend(BenchmarkBackend):
                             + "\n"
                         )
                     break
-                result = self._run_item(item, model, base_url, api_key, effort, cancel_event)
+                result = self._run_item(item, model, base_url, api_key, effort, cancel_event, log_path=log_path)
                 handle.write(json.dumps(result, ensure_ascii=True) + "\n")
                 handle.flush()
                 # 顺序执行：index+1 即已完成题数（含断点续跑跳过的前缀）。
@@ -1270,7 +1278,7 @@ class ApiEvalBackend(BenchmarkBackend):
                     continue
                 if cancel_event is not None and cancel_event.is_set():
                     return True
-                future = pool.submit(self._run_item, item, model, base_url, api_key, effort, cancel_event)
+                future = pool.submit(self._run_item, item, model, base_url, api_key, effort, cancel_event, log_path=log_path)
                 future_to_index[future] = index
             cancelled = False
             # 完成即记：题目一结束就写运行日志并推进实时进度，而不是等
@@ -1390,7 +1398,7 @@ class ApiEvalBackend(BenchmarkBackend):
                         cancelled = True
                         break
                     result = self._run_item(
-                        items[index], model, base_url, api_key, effort, cancel_event
+                        items[index], model, base_url, api_key, effort, cancel_event, log_path=log_path
                     )
                     updates[index] = result
                     settled += 1
@@ -1450,7 +1458,7 @@ class ApiEvalBackend(BenchmarkBackend):
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_index = {
                 pool.submit(
-                    self._run_item, items[index], model, base_url, api_key, effort, cancel_event
+                    self._run_item, items[index], model, base_url, api_key, effort, cancel_event, log_path=log_path
                 ): index
                 for index in retry_indices
             }
@@ -1490,10 +1498,25 @@ class ApiEvalBackend(BenchmarkBackend):
         api_key: str,
         effort: str,
         cancel_event: Event | None = None,
+        *,
+        log_path: Path | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
         # 首 token 时延（TTFT）由 gateway_complete 就地写回：仅流式响应才有值。
         timing: dict[str, float] = {}
+
+        def on_stream_delta(kind: str, text: str) -> None:
+            if log_path is None:
+                return
+            _append_stream_log(
+                log_path,
+                benchmark=self.name,
+                model=model,
+                task_id=item.task_id,
+                kind=kind,
+                text=text,
+            )
+
         content, usage, error = gateway_complete(
             base_url,
             api_key,
@@ -1504,6 +1527,7 @@ class ApiEvalBackend(BenchmarkBackend):
             max_tokens=self.max_tokens,
             cancel_event=cancel_event,
             timing=timing,
+            stream_callback=on_stream_delta,
         )
         wall_time_sec = time.monotonic() - started
         if error is not None:
@@ -1900,6 +1924,28 @@ def _append_log(path: Path, message: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(message + "\n")
+
+
+def _append_stream_log(
+    path: Path,
+    *,
+    benchmark: str,
+    model: str,
+    task_id: str,
+    kind: str,
+    text: str,
+) -> None:
+    # One physical line per SSE delta keeps tailing simple and prevents partial
+    # UTF-8/newline chunks from corrupting the shared multi-run log. The JSON
+    # string preserves exact streamed text while the prefix makes concurrent
+    # model/bench/task output distinguishable.
+    escaped = json.dumps(text, ensure_ascii=False)
+    _append_log(
+        path,
+        _log_line(
+            f"[stream] model={model} bench={benchmark} task={task_id} kind={kind} delta={escaped}"
+        ),
+    )
 
 
 def _log_line(message: str) -> str:
