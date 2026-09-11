@@ -58,8 +58,11 @@ def create_publication_blueprint(
             )
         except ValueError as caught:
             return error(str(caught), 409)
-        except (KeyError, OSError):
-            return error("run results could not be published", 503)
+        except (KeyError, OSError) as caught:
+            return error(
+                f"run results could not be published: {caught.__class__.__name__}: {caught}",
+                503,
+            )
         return ok(
             {
                 "snapshot_id": publication.snapshot_id,
@@ -83,8 +86,13 @@ def create_publication_blueprint(
             publication = service.publish(
                 run_id, publisher=publisher, merge_with_current=merge
             )
-        except (KeyError, OSError, ValueError):
-            return error("run results could not be published", 503)
+        except ValueError as caught:
+            return error(str(caught), 409)
+        except (KeyError, OSError) as caught:
+            return error(
+                f"run results could not be published: {caught.__class__.__name__}: {caught}",
+                503,
+            )
         return ok(
             {
                 "snapshot_id": publication.snapshot_id,

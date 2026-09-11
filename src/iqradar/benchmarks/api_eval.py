@@ -495,6 +495,7 @@ def gateway_complete(
     reasoning_effort: str | None = None,
     max_tokens: int | None = None,
     cancel_event: Event | None = None,
+    timing: dict[str, float] | None = None,
 ) -> tuple[str | None, dict[str, int], str | None]:
     """POST one chat completion to an OpenAI-compatible gateway (streaming).
 
@@ -514,6 +515,13 @@ def gateway_complete(
     returns whatever content accumulated so far (possibly ``""``). This lets a
     user-requested interrupt unwind a long streaming generation within seconds
     instead of waiting for the full per-call timeout.
+
+    When *timing* is a dict it is filled in place with the stream timings that
+    do not fit the return value (see :func:`_parse_sse_stream`):
+    ``first_token_sec`` (first SSE delta, reasoning included) and
+    ``first_content_sec`` (first visible ``content`` delta). Both are measured
+    from just before the HTTP request is issued, so they include connect time.
+    Callers that do not need them pass nothing and nothing changes.
     """
     endpoint = InferenceEndpoint(base_url, api_key)
     url = endpoint.chat_completions_url()
@@ -531,11 +539,20 @@ def gateway_complete(
     headers["Accept"] = "text/event-stream"
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    # 首 token 时延的计时起点：包含建连与请求发送，与客户端常见的
+    # 「从发起请求到第一个 token」定义一致。
+    started_at = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=timeout_sec) as response:
             content_type = response.headers.get("Content-Type", "")
             if "text/event-stream" in content_type:
-                return _parse_sse_stream(response, timeout_sec, cancel_event)
+                return _parse_sse_stream(
+                    response,
+                    timeout_sec,
+                    cancel_event,
+                    started_at=started_at,
+                    timing=timing,
+                )
             # Gateway ignored stream:true and returned a single JSON body.
             raw = response.read().decode("utf-8", errors="replace")
             return _parse_non_stream_json(raw)
@@ -550,6 +567,9 @@ def _parse_sse_stream(
     response: object,
     timeout_sec: int,
     cancel_event: Event | None = None,
+    *,
+    started_at: float | None = None,
+    timing: dict[str, float] | None = None,
 ) -> tuple[str | None, dict[str, int], str | None]:
     """Read an SSE chat-completion stream and accumulate content + usage.
 
@@ -557,12 +577,32 @@ def _parse_sse_stream(
     ``content`` / ``reasoning_content`` text and an optional ``usage`` in the
     final chunk.  We concatenate all deltas; the final text is scored exactly
     like a non-streaming response (``_message_text`` rules apply).
+
+    When *timing* and *started_at* are given, the first-delta timings are
+    recorded into *timing* (seconds since *started_at*):
+
+    - ``first_token_sec`` — first delta carrying any text, ``reasoning_content``
+      included; this is the 首 token 时延（TTFT）as seen by a client;
+    - ``first_content_sec`` — first delta carrying visible ``content``, which is
+      later than ``first_token_sec`` when the model streams reasoning first.
+
+    Role-only or empty deltas do not count as a token. Timings are absent when
+    the gateway answered with a non-streaming body, or when no text arrived.
     """
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
     usage: dict[str, int] = {}
     has_content = False
     has_reasoning = False
+
+    def mark(kind: str) -> None:
+        if timing is None or started_at is None:
+            return
+        elapsed = round(time.monotonic() - started_at, 3)
+        timing.setdefault("first_token_sec", elapsed)
+        if kind == "content":
+            timing.setdefault("first_content_sec", elapsed)
+
     try:
         for raw_line in response:
             if cancel_event is not None and cancel_event.is_set():
@@ -594,10 +634,12 @@ def _parse_sse_stream(
             if isinstance(c, str) and c:
                 content_parts.append(c)
                 has_content = True
+                mark("content")
             rc = delta.get("reasoning_content") or delta.get("reasoning")
             if isinstance(rc, str) and rc:
                 reasoning_parts.append(rc)
                 has_reasoning = True
+                mark("reasoning")
     except (OSError, TimeoutError) as error:
         # If we already have partial content, return it as-is (the stream was
         # truncated mid-way, but the answer might still be parseable).
@@ -1442,6 +1484,8 @@ class ApiEvalBackend(BenchmarkBackend):
         cancel_event: Event | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
+        # 首 token 时延（TTFT）由 gateway_complete 就地写回：仅流式响应才有值。
+        timing: dict[str, float] = {}
         content, usage, error = gateway_complete(
             base_url,
             api_key,
@@ -1451,6 +1495,7 @@ class ApiEvalBackend(BenchmarkBackend):
             reasoning_effort=effort,
             max_tokens=self.max_tokens,
             cancel_event=cancel_event,
+            timing=timing,
         )
         wall_time_sec = time.monotonic() - started
         if error is not None:
@@ -1462,6 +1507,7 @@ class ApiEvalBackend(BenchmarkBackend):
                 error_message=error,
                 usage=usage,
                 wall_time_sec=wall_time_sec,
+                timing=timing,
             )
         if content is None or content == "":
             return self._result(
@@ -1472,6 +1518,7 @@ class ApiEvalBackend(BenchmarkBackend):
                 error_message="empty model response",
                 usage=usage,
                 wall_time_sec=wall_time_sec,
+                timing=timing,
             )
         if item.match == "judge":
             correct, reason = self._judge(item, content, base_url, api_key, model, cancel_event)
@@ -1485,6 +1532,7 @@ class ApiEvalBackend(BenchmarkBackend):
             error_message=None if correct else f"scored wrong ({reason})",
             usage=usage,
             wall_time_sec=wall_time_sec,
+            timing=timing,
         )
 
     def _judge(
@@ -1525,7 +1573,9 @@ class ApiEvalBackend(BenchmarkBackend):
         error_message: str | None,
         usage: dict[str, int],
         wall_time_sec: float,
+        timing: dict[str, float] | None = None,
     ) -> dict[str, Any]:
+        timing = timing or {}
         return {
             "task_id": item.task_id,
             "prompt": item.prompt,
@@ -1540,6 +1590,10 @@ class ApiEvalBackend(BenchmarkBackend):
             "cached_input_tokens": _int(usage.get("cached_input_tokens")),
             "usage_estimated": not bool(usage),
             "wall_time_sec": round(wall_time_sec, 3),
+            # 首 token 时延（TTFT）：None 表示该次调用没有流式首字信息
+            # （网关返回非流式正文、请求失败，或记录早于该字段上线）。
+            "first_token_sec": timing.get("first_token_sec"),
+            "first_content_sec": timing.get("first_content_sec"),
         }
 
     def _error_result(

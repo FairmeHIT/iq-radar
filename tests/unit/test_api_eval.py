@@ -300,6 +300,92 @@ class TestGatewayComplete:
         assert content == "fallback"
         assert error is None
 
+    def test_gateway_complete_records_first_token_timing(self, monkeypatch) -> None:
+        """流式响应的首 token/首正文时延被写回 timing（含建连，故从请求前起算）。"""
+        sse_lines = [
+            # role-only delta 不算 token
+            'data: {"choices":[{"delta":{"role":"assistant"}}]}\n',
+            'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n',
+            'data: {"choices":[{"delta":{"content":"hel"}}]}\n',
+            'data: {"choices":[{"delta":{"content":"lo"}}]}\n',
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
+            'data: [DONE]\n',
+        ]
+        body = "".join(sse_lines)
+
+        def fake_urlopen(request, timeout=None):
+            return _FakeResponse(body, content_type="text/event-stream")
+
+        # 受控时钟：每次调用 +1s，便于断言精确的秒数
+        ticks = iter(range(0, 1000))
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(api_eval.time, "monotonic", lambda: float(next(ticks)))
+
+        timing: dict[str, float] = {}
+        content, _, error = gateway_complete("http://gw/v1", "k", "m", "hi", timing=timing)
+        assert content == "hello"
+        assert error is None
+        # 起点 started_at = 0.0；首个 reasoning delta = 1.0；首个 content delta = 2.0
+        assert timing == {"first_token_sec": 1.0, "first_content_sec": 2.0}
+
+    def test_gateway_complete_timing_absent_for_non_stream(self, monkeypatch) -> None:
+        """非流式正文没有首字时刻，timing 保持为空（下游记 None）。"""
+        def fake_urlopen(request, timeout=None):
+            return _FakeResponse('{"choices":[{"message":{"content":"42"}}]}')
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        timing: dict[str, float] = {}
+        content, _, error = gateway_complete("http://gw/v1", "k", "m", "hi", timing=timing)
+        assert content == "42"
+        assert error is None
+        assert timing == {}
+
+    def test_run_records_first_token_sec_in_results(self, tmp_path: Path, monkeypatch) -> None:
+        """端到端：评测写出的 results.jsonl 每行带 first_token_sec。"""
+        dataset = tmp_path / "q.jsonl"
+        lines = [json.dumps({"task_id": "t0", "prompt": "p0", "reference": "r"})]
+        dataset.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        backend = _backend(tmp_path, dataset, name="demo")
+
+        sse = (
+            'data: {"choices":[{"delta":{"content":"r"}}]}\n'
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}],'
+            '"usage":{"prompt_tokens":1,"completion_tokens":1}}\n'
+            'data: [DONE]\n'
+        ).encode("utf-8")
+
+        class _SseResponse:
+            headers = {"Content-Type": "text/event-stream"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc: object) -> bool:
+                return False
+
+            def __iter__(self):
+                return iter(sse.splitlines(keepends=True))
+
+        monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout=None: _SseResponse())
+        monkeypatch.setenv("GATEWAY_BASE_URL", "http://gw/v1")
+        ticks = iter(range(0, 1000))
+        monkeypatch.setattr(api_eval.time, "monotonic", lambda: float(next(ticks)))
+
+        returncode, _ = backend.run(
+            run_id="r1",
+            model_name="openai/m",
+            n_tasks=1,
+            sample_seed=0,
+            log_path=tmp_path / "run.log",
+        )
+        assert returncode == 0
+        row = json.loads(
+            (backend.jobs_root / "r1" / "results.jsonl").read_text(encoding="utf-8").splitlines()[0]
+        )
+        assert row["status"] == "passed"
+        assert isinstance(row["first_token_sec"], float)
+        assert row["first_content_sec"] == row["first_token_sec"]
+
 
 # ---------------------------------------------------------------------------
 # Backend run / import / lifecycle

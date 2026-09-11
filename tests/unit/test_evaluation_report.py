@@ -106,6 +106,35 @@ def make_record(task_id: str, status: str, error_type: str | None = None) -> Run
     )
 
 
+def test_report_keeps_first_token_timings() -> None:
+    """首 token 时延（TTFT）随题目行进入评测报告；缺失时保持缺键而不是伪造 0。"""
+    run = {"run_id": "run-1", "model_id": "model-a", "benchmark": "hle", "status": "completed"}
+    raw_questions = [
+        {
+            "index": 0,
+            "task_id": "q1",
+            "status": "passed",
+            "response": "2",
+            "wall_time_sec": 3.0,
+            "first_token_sec": 0.42,
+            "first_content_sec": 1.75,
+        },
+        {"index": 1, "task_id": "q2", "status": "passed", "response": "4", "wall_time_sec": 2.0},
+    ]
+
+    report = build_evaluation_report(
+        run=run,
+        records=[make_record("q1", "passed"), make_record("q2", "passed")],
+        raw_questions=raw_questions,
+        expected_questions=[{"task_id": "q1"}, {"task_id": "q2"}],
+    )
+
+    first, second = report["questions"]
+    assert first["first_token_sec"] == 0.42
+    assert first["first_content_sec"] == 1.75
+    assert "first_token_sec" not in second
+
+
 def test_report_lists_unexecuted_questions_with_coverage(tmp_path: Path) -> None:
     run = {"run_id": "run-1", "model_id": "model-a", "benchmark": "deep-swe", "status": "completed"}
     expected = [

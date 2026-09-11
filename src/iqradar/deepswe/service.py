@@ -459,7 +459,11 @@ class DeepSweService:
             if run.status != "completed":
                 not_completed.append(rid)
                 continue
-            imported = self.records(rid)
+            try:
+                imported = self.records(rid)
+            except (KeyError, OSError, ValueError, json.JSONDecodeError, TypeError) as caught:
+                no_records.append(f"{rid} ({caught.__class__.__name__}: {caught})")
+                continue
             if not imported:
                 no_records.append(rid)
                 continue
