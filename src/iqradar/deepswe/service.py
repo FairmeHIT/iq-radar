@@ -10,10 +10,11 @@ from pathlib import Path
 from threading import Event, RLock, Thread
 from uuid import uuid4
 
+from iqradar.benchmarks.api_eval import is_gateway_failure
 from iqradar.benchmarks.base import BenchmarkBackend
 from iqradar.config.schema import PriceConfig
 from iqradar.deepswe.importer import base_url_hash
-from iqradar.metrics.evaluation import build_evaluation_report, classify_outcome
+from iqradar.metrics.evaluation import build_evaluation_report
 from iqradar.deepswe.runner import DeepSweConfig
 from iqradar.deepswe.runs import DeepSweRun, FileDeepSweRunStore
 from iqradar.schemas.run_record import RunRecord
@@ -78,6 +79,8 @@ class DeepSweService:
         self._batches_root.mkdir(parents=True, exist_ok=True)
         self._multi_batches_root = runs.root.parent / "multi-batches"
         self._multi_batches_root.mkdir(parents=True, exist_ok=True)
+        self._retry_batches_root = runs.root.parent / "retry-batches"
+        self._retry_batches_root.mkdir(parents=True, exist_ok=True)
 
     # --- backend access -----------------------------------------------------
 
@@ -358,20 +361,7 @@ class DeepSweService:
             )
         except (OSError, ValueError, json.JSONDecodeError, TypeError, KeyError):
             return None
-        count = 0
-        for question in questions:
-            status = str(question.get("status") or "failed")
-            if status == "passed":
-                continue
-            error_type = question.get("error_type")
-            outcome, category = classify_outcome(
-                status, str(error_type) if error_type is not None else None
-            )
-            if outcome == "infrastructure_error" and not str(
-                category or ""
-            ).startswith("model_"):
-                count += 1
-        return count
+        return sum(1 for question in questions if is_gateway_failure(question))
 
     def delete_run(self, run_id: str, *, publisher: object | None = None) -> bool:
         """Delete a run's on-disk state/artifacts and clear dashboard publications.
@@ -548,6 +538,7 @@ class DeepSweService:
         *,
         model_name: str,
         publisher: object = None,
+        max_concurrent_runs: int = 1,
     ) -> DeepSweRun | None:
         """重测一个已完成 api-eval run 中因网关超时/临时错误失败的题目。
 
@@ -558,8 +549,8 @@ class DeepSweService:
         """
         with self._lock:
             self._reconcile_all()
-            if self._runs.active_runs():
-                raise ValueError("another run is already active")
+            if len(self._runs.active_runs()) >= max_concurrent_runs:
+                raise ValueError("concurrent run limit reached")
             run = self._runs.get(run_id)
             if run is None:
                 raise ValueError("run not found")
@@ -1342,6 +1333,261 @@ class DeepSweService:
         except (ProcessLookupError, PermissionError):
             pass
         return True
+
+    # --- gateway-failure retry batches ------------------------------------
+
+    RETRY_BATCH_POLL_SEC = 2
+
+    def submit_retry_gateway_failures_batch(
+        self,
+        *,
+        items: list[dict[str, str]],
+        max_concurrent: int,
+        publisher: object | None = None,
+    ) -> dict[str, object]:
+        """Retry gateway-failure questions across many finished api-eval runs.
+
+        This is the batch/concurrent counterpart of ``retry_run_gateway_failures``:
+        every item points at an existing completed/failed run and carries the
+        resolved gateway model name. The worker schedules up to *max_concurrent*
+        retry threads at a time; each retry still filters to true transient
+        gateway failures via the backend.
+        """
+        if not items:
+            raise ValueError("at least one run is required")
+        if not 1 <= max_concurrent <= 16:
+            raise ValueError("max_concurrent must be between 1 and 16")
+        with self._lock:
+            self._reconcile_all()
+            self._reconcile_all_retry_batches()
+            if self._runs.active_runs():
+                raise ValueError("another run is already active")
+            batch_id = uuid4().hex
+            state: dict[str, object] = {
+                "batch_id": batch_id,
+                "kind": "gateway-retry",
+                "status": "running",
+                "max_concurrent": max_concurrent,
+                "n_tasks": sum(int(e.get("retryable_count") or 0) for e in items),
+                "sample_seed": 0,
+                "effort": "mixed",
+                "n_concurrent": None,
+                "created_at": datetime.now(UTC).isoformat(),
+                "completed_at": None,
+                "cancel_requested": False,
+                "snapshot_id": None,
+                "error": None,
+                "items": [
+                    {
+                        "benchmark": e["benchmark"],
+                        "model_id": e["model_id"],
+                        "model_name": e["model_name"],
+                        "n_tasks": int(e.get("retryable_count") or 0),
+                        "status": "pending",
+                        "run_id": e["run_id"],
+                    }
+                    for e in items
+                ],
+            }
+            self._save_retry_batch(state)
+            thread = Thread(
+                target=self._execute_retry_batch,
+                args=(batch_id, max_concurrent, publisher),
+                name=f"gateway-retry-batch-{batch_id}",
+                daemon=True,
+            )
+            thread.start()
+            return state
+
+    def _execute_retry_batch(
+        self,
+        batch_id: str,
+        max_concurrent: int,
+        publisher: object | None,
+    ) -> None:
+        state = self._load_retry_batch(batch_id)
+        if state is None:
+            return
+        items: list = state["items"]  # type: ignore[union-attr]
+        pending = list(range(len(items)))
+        in_flight: dict[str, int] = {}
+        cancelled = False
+        try:
+            while pending or in_flight:
+                with self._lock:
+                    state = self._load_retry_batch(batch_id)
+                    if state is None:
+                        return
+                    if state.get("cancel_requested") or state.get("status") != "running":
+                        cancelled = True
+                        break
+                    items = state["items"]  # type: ignore[union-attr]
+                    while pending and len(in_flight) < max_concurrent:
+                        index = pending.pop(0)
+                        entry = items[index]
+                        run_id = str(entry["run_id"])
+                        try:
+                            self.retry_run_gateway_failures(
+                                run_id,
+                                model_name=str(entry["model_name"]),
+                                publisher=publisher,
+                                max_concurrent_runs=max_concurrent,
+                            )
+                            entry["status"] = "running"
+                            in_flight[run_id] = index
+                        except ValueError as caught:
+                            entry["status"] = "failed"
+                            entry["error"] = str(caught)
+                        self._save_retry_batch(state)
+                if cancelled:
+                    break
+                time.sleep(self.RETRY_BATCH_POLL_SEC)
+                with self._lock:
+                    state = self._load_retry_batch(batch_id)
+                    if state is None:
+                        return
+                    items = state["items"]  # type: ignore[union-attr]
+                    for run_id in list(in_flight):
+                        run = self.get(run_id)
+                        if run is None:
+                            continue
+                        if run.status in ("completed", "failed"):
+                            index = in_flight.pop(run_id)
+                            items[index]["status"] = run.status
+                            self._save_retry_batch(state)
+                    if state.get("status") == "running":
+                        self._save_retry_batch(state)
+            with self._lock:
+                state = self._load_retry_batch(batch_id) or state
+                cancelled = cancelled or bool(state.get("cancel_requested"))
+            for run_id in in_flight:
+                self.cancel(run_id)
+            with self._lock:
+                state = self._load_retry_batch(batch_id) or state
+                state["status"] = "cancelled" if cancelled else "completed"  # type: ignore[union-attr]
+                state["completed_at"] = datetime.now(UTC).isoformat()  # type: ignore[union-attr]
+                self._save_retry_batch(state)
+        except Exception as caught:
+            with self._lock:
+                state = self._load_retry_batch(batch_id) or {}
+                state["status"] = "failed"  # type: ignore[union-attr]
+                state["error"] = f"{caught.__class__.__name__}: {caught}"  # type: ignore[union-attr]
+                state["completed_at"] = datetime.now(UTC).isoformat()  # type: ignore[union-attr]
+                self._save_retry_batch(state)
+
+    def cancel_retry_batch(self, batch_id: str) -> bool:
+        with self._lock:
+            state = self._load_retry_batch(batch_id)
+            if state is None:
+                return False
+            if state.get("status") == "cancelled":
+                return True
+            if state.get("status") != "running":
+                return False
+            state["cancel_requested"] = True
+            state["status"] = "cancelled"
+            state["completed_at"] = datetime.now(UTC).isoformat()
+            self._save_retry_batch(state)
+            active_run_ids = [
+                str(e["run_id"])
+                for e in state.get("items", [])  # type: ignore[union-attr]
+                if e.get("status") == "running" and e.get("run_id")
+            ]
+        for run_id in active_run_ids:
+            self.cancel(run_id)
+        return True
+
+    def get_retry_batch(self, batch_id: str) -> dict[str, object] | None:
+        state = self._load_retry_batch(batch_id)
+        if state is None:
+            return None
+        return self._reconcile_retry_batch(state)
+
+    def latest_retry_batch(self) -> dict[str, object] | None:
+        latest: dict[str, object] | None = None
+        latest_created = ""
+        for path in self._retry_batches_root.glob("*.json"):
+            state = self._load_retry_batch(path.stem)
+            if state is None:
+                continue
+            created = str(state.get("created_at", ""))
+            if created > latest_created:
+                latest = state
+                latest_created = created
+        if latest is None:
+            return None
+        return self._reconcile_retry_batch(latest)
+
+    def _reconcile_all_retry_batches(self) -> None:
+        for path in self._retry_batches_root.glob("*.json"):
+            state = self._load_retry_batch(path.stem)
+            if state is not None:
+                self._reconcile_retry_batch(state)
+
+    def _reconcile_retry_batch(self, state: dict[str, object] | None) -> dict[str, object] | None:
+        if state is None:
+            return state
+        entries = state.get("items")
+        if not isinstance(entries, list):
+            return state
+        has_pending = False
+        has_active_run = False
+        changed = False
+        for entry in entries:
+            if entry.get("status") in {"pending", "running"}:
+                has_pending = True
+            run_id = entry.get("run_id")
+            if not run_id:
+                continue
+            run = self._runs.get(str(run_id))
+            if run is not None:
+                run = self._reconcile_active_run(run)
+            real = run.status if run is not None else "failed"
+            if entry.get("status") == "running" and real in {"completed", "failed"}:
+                entry["status"] = real
+                changed = True
+            if real in {"queued", "running"}:
+                has_active_run = True
+        if state.get("status") != "running":
+            if changed:
+                self._save_retry_batch(state)
+            return state
+        if has_active_run:
+            return state
+        if state.get("cancel_requested"):
+            state["status"] = "cancelled"
+            changed = True
+        elif not has_pending:
+            if changed or self._batch_idle_sec(state) >= self.RECONCILE_AGE_SEC:
+                state["status"] = "completed"
+                changed = True
+        elif self._batch_idle_sec(state) >= self.RECONCILE_AGE_SEC:
+            state["status"] = "failed"
+            state["error"] = state.get("error") or "interrupted: server restarted mid-retry-batch"
+            changed = True
+        if changed:
+            if state.get("status") != "running":
+                state["completed_at"] = state.get("completed_at") or datetime.now(UTC).isoformat()
+            self._save_retry_batch(state)
+        return state
+
+    def _save_retry_batch(self, state: dict[str, object]) -> None:
+        state["updated_at"] = datetime.now(UTC).isoformat()
+        batch_id = str(state["batch_id"])
+        atomic_write_text(
+            self._retry_batches_root / f"{batch_id}.json",
+            json.dumps(state, ensure_ascii=True, indent=2) + "\n",
+        )
+
+    def _load_retry_batch(self, batch_id: str) -> dict[str, object] | None:
+        path = self._retry_batches_root / f"{batch_id}.json"
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
 
     # --- live logs ---------------------------------------------------------
 

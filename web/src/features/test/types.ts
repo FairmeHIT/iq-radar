@@ -229,9 +229,14 @@ export interface MultiBenchItem {
   run_id: string | null
 }
 
+export interface RetryGatewayFailuresBatchRequest {
+  run_ids: string[]
+  max_concurrent: number
+}
+
 export interface MultiBenchState {
   batch_id: string
-  kind: 'multi-bench'
+  kind: 'multi-bench' | 'gateway-retry'
   status: 'running' | 'completed' | 'failed' | 'cancelled'
   max_concurrent: number
   n_tasks: number

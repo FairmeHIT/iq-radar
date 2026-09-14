@@ -18,6 +18,7 @@ import type {
   Publication,
   RunDeleteResult,
   RunLogs,
+  RetryGatewayFailuresBatchRequest,
   RunPublishResult,
   RunQuestion,
 } from './types'
@@ -93,6 +94,24 @@ export function fetchEvaluationReport(runId: string): Promise<EvaluationReport> 
 }
 
 /** 重测指定题目：单题传一个 task_id，全部重测传该 run 的全部 task_id。 */
+export function submitRetryGatewayFailuresBatch(
+  request: RetryGatewayFailuresBatchRequest,
+): Promise<MultiBenchState> {
+  return postJson<MultiBenchState>('/api/deepswe-runs/retry-gateway-failures-batch', request)
+}
+
+export function fetchRetryGatewayFailuresBatch(batchId: string): Promise<MultiBenchState> {
+  return getJson<MultiBenchState>(
+    `/api/deepswe-runs/retry-gateway-failures-batch/${encodeURIComponent(batchId)}`,
+  )
+}
+
+export function cancelRetryGatewayFailuresBatch(batchId: string): Promise<MultiBenchState> {
+  return postJson<MultiBenchState>(
+    `/api/deepswe-runs/retry-gateway-failures-batch/${encodeURIComponent(batchId)}/cancel`,
+  )
+}
+
 export function retryRunQuestions(runId: string, taskIds: string[]): Promise<DeepSweRun> {
   return postJson<DeepSweRun>(
     `/api/deepswe-runs/${encodeURIComponent(runId)}/retry-questions`,

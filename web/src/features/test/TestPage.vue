@@ -5,6 +5,7 @@ import {
   cancelBatch,
   cancelDeepSweRun,
   cancelMultiBatch,
+  cancelRetryGatewayFailuresBatch,
   deleteDeepSweRun,
   deleteDeepSweRuns,
   fetchBatch,
@@ -20,6 +21,7 @@ import {
   fetchMultiBatch,
   fetchRunLog,
   fetchRunLogSources,
+  fetchRetryGatewayFailuresBatch,
   fetchEvaluationReport,
   fetchRunQuestions,
   publishDeepSweRun,
@@ -31,6 +33,7 @@ import {
   submitBatch,
   submitDeepSweRun,
   submitMultiBench,
+  submitRetryGatewayFailuresBatch,
   testGatewayChat,
   testGatewayModels,
   unpublishDeepSweRun,
@@ -186,6 +189,8 @@ const runBenchmarkFilter = ref('all')
 const selectedRunIds = ref<string[]>([])
 const deletingRuns = ref(false)
 const publishingRuns = ref(false)
+const retryingGatewayFailures = ref(false)
+const retryingGatewayRunId = ref<string | null>(null)
 const runsNotice = ref<string | null>(null)
 
 // ── 网关配置（可填入 models 列表获取与模型调用的 baseurl/key，保存即生效）──
@@ -333,8 +338,12 @@ function hint(text: string) {
 function defaultRunConcurrency(totalRuns: number): number {
   return Math.max(1, Math.min(MAX_PARALLEL_RUNS, totalRuns || 1))
 }
+function multiBatchKindLabel(batch: MultiBenchState | null | undefined): string {
+  return batch?.kind === 'gateway-retry' ? '一键重测' : '多基准并发'
+}
+
 const phase = computed(() => {
-  if (multiBatchInfo.value?.status === 'running') return { tone: 'running', text: '多基准并发进行中' }
+  if (multiBatchInfo.value?.status === 'running') return { tone: 'running', text: `${multiBatchKindLabel(multiBatchInfo.value)}进行中` }
   if (batchInfo.value?.status === 'running') return { tone: 'running', text: '批量评测进行中' }
   if (execution.value) {
     const status = execution.value.status
@@ -344,9 +353,10 @@ const phase = computed(() => {
     return { tone: 'danger', text: '评测失败' }
   }
   if (multiBatchInfo.value) {
-    if (multiBatchInfo.value.status === 'completed') return { tone: 'success', text: '多基准并发完成' }
-    if (multiBatchInfo.value.status === 'cancelled') return { tone: 'muted', text: '多基准并发已取消' }
-    return { tone: 'danger', text: '多基准并发失败' }
+    const label = multiBatchKindLabel(multiBatchInfo.value)
+    if (multiBatchInfo.value.status === 'completed') return { tone: 'success', text: `${label}完成` }
+    if (multiBatchInfo.value.status === 'cancelled') return { tone: 'muted', text: `${label}已取消` }
+    return { tone: 'danger', text: `${label}失败` }
   }
   if (batchInfo.value) {
     if (batchInfo.value.status === 'completed') return { tone: 'success', text: '批量评测完成' }
@@ -387,6 +397,17 @@ const filteredRunsList = computed(() =>
       (runStatusFilter.value === 'all' || run.status === runStatusFilter.value)
       && (runModelFilter.value === 'all' || run.model_id === runModelFilter.value)
       && (runBenchmarkFilter.value === 'all' || run.benchmark === runBenchmarkFilter.value),
+  ),
+)
+const gatewayFailureRetestableRuns = computed(() =>
+  allRuns.value.filter(
+    (run) => runIsGatewayFailureRetestable(run),
+  ),
+)
+const gatewayFailureRetestableQuestionCount = computed(() =>
+  gatewayFailureRetestableRuns.value.reduce(
+    (sum, run) => sum + (run.retryable_infrastructure_failure_count ?? 0),
+    0,
   ),
 )
 const allFilteredSelected = computed(
@@ -556,11 +577,15 @@ async function startMultiBench() {
   }
 }
 
-async function pollMultiBatch(batchId: string, requestId: number): Promise<void> {
+async function pollMultiBatch(
+  batchId: string,
+  requestId: number,
+  fetcher: (batchId: string) => Promise<MultiBenchState> = fetchMultiBatch,
+): Promise<void> {
   while (requestId === pollRequestId.value) {
     let batch: MultiBenchState
     try {
-      batch = await fetchMultiBatch(batchId)
+      batch = await fetcher(batchId)
     } catch (caught) {
       if (requestId !== pollRequestId.value) return
       error.value = caught instanceof Error ? caught.message : '多基准并发状态轮询失败'
@@ -573,6 +598,7 @@ async function pollMultiBatch(batchId: string, requestId: number): Promise<void>
     const current = batch.items.find((i) => i.status === 'running' && i.run_id)
     if (current?.run_id) {
       try {
+        retryingGatewayRunId.value = batch.kind === 'gateway-retry' ? current.run_id : null
         const currentRun = await fetchDeepSweRun(current.run_id)
         execution.value = currentRun
         runProgress.value = currentRun.progress ?? null
@@ -582,6 +608,7 @@ async function pollMultiBatch(batchId: string, requestId: number): Promise<void>
     }
     if (batch.status !== 'running') {
       // 批次完成不再自动发布：publication 仅在单 run 完成或手动发布后设置。
+      await loadRuns()
       return
     }
     await new Promise((resolve) => setTimeout(resolve, 3000))
@@ -733,7 +760,9 @@ async function cancelRun() {
   error.value = null
   try {
     if (multiBatchInfo.value?.status === 'running' && multiBatchInfo.value.batch_id) {
-      multiBatchInfo.value = await cancelMultiBatch(multiBatchInfo.value.batch_id)
+      multiBatchInfo.value = multiBatchInfo.value.kind === 'gateway-retry'
+        ? await cancelRetryGatewayFailuresBatch(multiBatchInfo.value.batch_id)
+        : await cancelMultiBatch(multiBatchInfo.value.batch_id)
     } else if (batchInfo.value?.status === 'running' && batchInfo.value.batch_id) {
       batchInfo.value = await cancelBatch(batchInfo.value.batch_id)
     } else if (execution.value?.run_id) {
@@ -973,21 +1002,21 @@ function failureCategoryLabel(category: string | null | undefined) {
  * 「全部重测」只批量重跑基础设施/调用链失败题。
  * 通过题、模型作答错误（含空答案、超时等模型失败）不应被批量重测。
  */
+function isTransientGatewayError(errorType: string | null | undefined, errorMessage: string | null | undefined) {
+  if (errorType !== 'HTTPError') return true
+  const match = String(errorMessage || '').match(/^HTTPError:(\d{3}):/)
+  if (!match) return true
+  const status = Number(match[1])
+  return status === 408 || status === 425 || status === 429 || (status >= 500 && status < 600)
+}
+
 function isAllRetryQuestion(q: RunQuestion) {
   if (q.recorded === false || q.status === 'passed') return false
-  if (q.outcome === 'infrastructure_error') return true
-  if (q.outcome === 'model_failure' || q.outcome === 'success') return false
-  const category = q.failure_category
-  if (category?.startsWith('model_')) return false
-  return (
-    q.status === 'runner_error' ||
-    q.status === 'verifier_error' ||
-    category === 'gateway_error' ||
-    category === 'judge_error' ||
-    category === 'harness_error' ||
-    category === 'verifier_error' ||
-    category === 'unknown_failure'
-  )
+  if (q.status === 'runner_error') return isTransientGatewayError(q.error_type, q.error_message)
+  if (q.status === 'verifier_error') return q.error_type === 'empty_response'
+  if (q.status === 'timeout') return true
+  if (q.status === 'failed') return q.error_type === 'judge_error'
+  return false
 }
 
 const allRetryQuestions = computed(() => questions.value.filter(isAllRetryQuestion))
@@ -1041,6 +1070,53 @@ function downloadEvaluationReport() {
 }
 
 /** 重测指定题目：taskIds 传一题即单题重测，传全部即全部重测。 */
+async function retryAllGatewayFailureRuns() {
+  const runs = gatewayFailureRetestableRuns.value
+  if (!runs.length || retryingGatewayFailures.value || hasActiveExecution()) return
+  const questionCount = gatewayFailureRetestableQuestionCount.value
+  const maxConcurrent = defaultRunConcurrency(runs.length)
+  if (
+    !window.confirm(
+      `确认一键并发重测所有因模型网关不可达/临时错误导致失败的题目？\n\n将按多模型 × 多基准批次并发重测 ${runs.length} 个 run，共 ${questionCount} 道题，并发上限 ${maxConcurrent}。模型答错的题目不会重测。`,
+    )
+  ) return
+
+  const requestId = pollRequestId.value + 1
+  pollRequestId.value = requestId
+  retryingGatewayFailures.value = true
+  running.value = true
+  runsError.value = null
+  runsNotice.value = null
+  error.value = null
+  batchInfo.value = null
+  multiBatchInfo.value = null
+  execution.value = null
+  logContent.value = ''
+  logSources.value = []
+
+  try {
+    const batch = await submitRetryGatewayFailuresBatch({
+      run_ids: runs.map((run) => run.run_id),
+      max_concurrent: maxConcurrent,
+    })
+    multiBatchInfo.value = batch
+    runsNotice.value = `已启动一键并发重测：${batch.items.length} 个 run，${questionCount} 道网关失败题，并发上限 ${maxConcurrent}`
+    await pollMultiBatch(batch.batch_id, requestId, fetchRetryGatewayFailuresBatch)
+    runsNotice.value = '一键并发重测完成'
+  } catch (caught) {
+    if (requestId === pollRequestId.value) {
+      runsError.value = caught instanceof Error ? caught.message : '一键并发重测启动失败'
+    }
+  } finally {
+    retryingGatewayRunId.value = null
+    if (requestId === pollRequestId.value) {
+      retryingGatewayFailures.value = false
+      running.value = false
+    }
+    await loadRuns()
+  }
+}
+
 async function retryQuestions(taskIds: string[]) {
   const run = questionsRun.value
   if (!run || !taskIds.length || retryingQuestionIds.value.size) return
@@ -1155,6 +1231,13 @@ async function unpublishRun(run: DeepSweRun) {
 function runIsApiEval(run: DeepSweRun): boolean {
   const benchmark = benchmarks.value.find((b) => b.id === run.benchmark)
   return benchmark?.type === 'api-eval'
+}
+
+/** 模型网关不可达/临时错误导致失败的题目，可由「一键重测」安全批量处理。 */
+function runIsGatewayFailureRetestable(run: DeepSweRun): boolean {
+  return runIsApiEval(run)
+    && (run.status === 'completed' || run.status === 'failed')
+    && (run.retryable_infrastructure_failure_count ?? 0) > 0
 }
 
 /** 记录表里的断点续跑入口：后端确认有 partial results 时才展示。 */
@@ -1810,7 +1893,7 @@ onUnmounted(() => {
           </div>
           <div v-if="multiBatchInfo" class="batch-progress" data-testid="multi-batch-progress">
             <b>
-              多基准并发
+              {{ multiBatchKindLabel(multiBatchInfo) }}
               {{ multiBatchInfo.items.filter((i) => i.status === 'completed' || i.status === 'failed').length }}/{{ multiBatchInfo.items.length }}
               · 上限 {{ multiBatchInfo.max_concurrent }}
             </b>
@@ -1821,7 +1904,8 @@ onUnmounted(() => {
             </div>
             <span v-if="multiBatchInfo.status === 'failed'" class="error">{{ multiBatchInfo.error }}</span>
             <span v-if="multiBatchInfo.status === 'cancelled'" class="error">已取消</span>
-            <span v-if="multiBatchInfo.status === 'completed'" class="hint">已完成，请在下方「评测记录」选择记录发布到大盘</span>
+            <span v-if="multiBatchInfo.status === 'completed' && multiBatchInfo.kind === 'gateway-retry'" class="hint">已完成，网关失败题已原位更新；已发布记录会自动重发布</span>
+            <span v-else-if="multiBatchInfo.status === 'completed'" class="hint">已完成，请在下方「评测记录」选择记录发布到大盘</span>
           </div>
         </section>
 
@@ -1921,7 +2005,7 @@ onUnmounted(() => {
         <button
           type="button"
           class="publish-action"
-          :disabled="!selectedRunIds.length || publishingRuns || deletingRuns"
+          :disabled="!selectedRunIds.length || publishingRuns || deletingRuns || retryingGatewayFailures"
           data-testid="publish-selected-runs"
           @click="publishSelectedRuns"
         >
@@ -1930,8 +2014,19 @@ onUnmounted(() => {
         </button>
         <button
           type="button"
+          class="publish-action"
+          :disabled="!gatewayFailureRetestableRuns.length || retryingGatewayFailures || deletingRuns || publishingRuns || hasActiveExecution()"
+          data-testid="retry-all-gateway-failures"
+          title="一键重测所有 api-eval 记录中因模型网关不可达/超时/5xx/限流等临时错误失败的题目；模型答错不重测"
+          @click="retryAllGatewayFailureRuns"
+        >
+          <RefreshCw :size="13" :class="{ spinning: retryingGatewayFailures }" />
+          {{ retryingGatewayFailures ? '重测中...' : `一键重测 (${gatewayFailureRetestableQuestionCount})` }}
+        </button>
+        <button
+          type="button"
           class="danger-action"
-          :disabled="!selectedRunIds.length || deletingRuns || publishingRuns"
+          :disabled="!selectedRunIds.length || deletingRuns || publishingRuns || retryingGatewayFailures"
           data-testid="delete-selected-runs"
           @click="deleteSelectedRuns"
         >
@@ -2004,12 +2099,12 @@ onUnmounted(() => {
                   v-if="runIsApiEval(run) && (run.status === 'completed' || run.status === 'failed')"
                   type="button"
                   class="picker-link"
-                  :disabled="publishingRunIds.has(run.run_id) || deletingRuns || run.retryable_infrastructure_failure_count === 0"
+                  :disabled="publishingRunIds.has(run.run_id) || deletingRuns || retryingGatewayFailures || run.retryable_infrastructure_failure_count === 0"
                   :data-testid="`retry-run-${run.run_id}`"
                   :title="run.retryable_infrastructure_failure_count === 0 ? '没有基础设施/调用链失败题可重测' : '查看逐题结果：可单题重测或全部重测基础设施/调用链失败题'"
                   @click="openRunQuestions(run)"
                 >
-                  重测
+                  {{ retryingGatewayRunId === run.run_id ? '重测中...' : '重测' }}
                 </button>
                 <button
                   v-if="run.status === 'completed' && !run.snapshot_id"

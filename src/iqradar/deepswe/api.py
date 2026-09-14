@@ -538,12 +538,93 @@ def create_deepswe_blueprint(
                 run_id,
                 model_name=_pier_model_name(model.effective_model_name()),
                 publisher=publisher,
+                max_concurrent_runs=1,
             )
         except ValueError as caught:
             return error(str(caught), 409)
         if updated is None:
             return error("deep-swe run not found", 404)
         return ok(updated.as_dict()), 202
+
+    @blueprint.post("/api/deepswe-runs/retry-gateway-failures-batch")
+    def retry_gateway_failures_batch():
+        """并发重测多个 run 中因模型网关不可达/临时错误失败的题目。"""
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return error("JSON retry batch request is required", 400)
+        run_ids = payload.get("run_ids")
+        max_concurrent = payload.get("max_concurrent")
+        if (
+            not isinstance(run_ids, list)
+            or not run_ids
+            or len(run_ids) > 200
+            or any(_run_id(run_id) is None for run_id in run_ids)
+        ):
+            return error("run_ids must be a non-empty list of valid run ids", 400)
+        if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int) or not 1 <= max_concurrent <= 16:
+            return error("max_concurrent must be an integer between 1 and 16", 400)
+        try:
+            config = _model_config(models_path, gateway_settings)
+        except (OSError, ValueError):
+            config = None
+        if config is None:
+            return error("model catalog is unavailable; cannot retry", 409)
+        resolved_items: list[dict[str, object]] = []
+        for run_id in dict.fromkeys(str(rid).strip() for rid in run_ids):
+            run = service.get(run_id)
+            if run is None:
+                return error(f"deep-swe run not found: {run_id}", 404)
+            backend = service.backends.get(run.benchmark or DEFAULT_BENCHMARK)
+            if getattr(backend, "benchmark_type", None) != "api-eval":
+                return error(f"retry only supported for api-eval runs: {run_id}", 409)
+            if run.status not in {"completed", "failed"}:
+                return error(f"only finished runs can be retried: {run_id}", 409)
+            retryable_count = service.retryable_infrastructure_failure_count(run)
+            if not retryable_count:
+                continue
+            model = _resolve_run_model(config, run.model_id)
+            if model is None:
+                return error(
+                    f"model '{run.model_id}' is no longer in the catalog; cannot retry",
+                    409,
+                )
+            resolved_items.append(
+                {
+                    "run_id": run.run_id,
+                    "benchmark": run.benchmark,
+                    "model_id": run.model_id,
+                    "model_name": _pier_model_name(model.effective_model_name()),
+                    "retryable_count": retryable_count,
+                }
+            )
+        if not resolved_items:
+            return error("no gateway-failure questions to retry", 409)
+        try:
+            batch = service.submit_retry_gateway_failures_batch(
+                items=resolved_items,
+                max_concurrent=max_concurrent,
+                publisher=publisher,
+            )
+        except ValueError as caught:
+            return error(str(caught), 409)
+        return ok(batch), 202
+
+    @blueprint.post("/api/deepswe-runs/retry-gateway-failures-batch/<batch_id>/cancel")
+    def cancel_retry_gateway_failures_batch(batch_id: str):
+        if service.get_retry_batch(batch_id) is None:
+            return error("retry batch not found", 404)
+        if not service.cancel_retry_batch(batch_id):
+            return error("retry batch is not active", 409)
+        return ok(service.get_retry_batch(batch_id))
+
+    @blueprint.get("/api/deepswe-runs/retry-gateway-failures-batch/latest")
+    def latest_retry_gateway_failures_batch():
+        return ok(service.latest_retry_batch())
+
+    @blueprint.get("/api/deepswe-runs/retry-gateway-failures-batch/<batch_id>")
+    def retry_gateway_failures_batch_status(batch_id: str):
+        batch = service.get_retry_batch(batch_id)
+        return ok(batch) if batch else error("retry batch not found", 404)
 
     @blueprint.get("/api/deepswe-runs/<run_id>/questions")
     def run_questions(run_id: str):
